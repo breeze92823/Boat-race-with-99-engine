@@ -90,11 +90,12 @@ export function flash(kind = 'gold') {
 export function cardsIn(root) {
   const cards = root.querySelectorAll('.pt-pet, .bt-tile, .gf-card, [role="option"]')
   const n = Math.min(cards.length, JUICE.cascade)
+  // One forced layout for the whole batch (not one per card) to restart the animation.
+  for (let i = 0; i < n; i++) cards[i].classList.remove('juice-in')
+  void root.offsetWidth
   for (let i = 0; i < n; i++) {
     const c = cards[i]
     c.style.setProperty('--ji', i)
-    c.classList.remove('juice-in')
-    void c.offsetWidth
     c.classList.add('juice-in')
     c.addEventListener('animationend', () => c.classList.remove('juice-in'), { once: true })
   }

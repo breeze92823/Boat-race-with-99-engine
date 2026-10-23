@@ -8,7 +8,7 @@
 //    collapses; dozens of them are what makes water sound like water
 //  - tone(): a pitched partial with glide (thumps, horns, whine)
 // Every call takes random variation (vary) so repeats never machine-gun.
-import { A } from './core.js'
+import { A, now } from './core.js'
 
 export const rnd = (lo, hi) => lo + Math.random() * (hi - lo)
 export const vary = (x, pct) => x * (1 + (Math.random() * 2 - 1) * pct)
@@ -57,7 +57,7 @@ function noiseSource(kind, t, dur) {
 //   gain, pan, verb, bus, sweep: seconds for f -> f2 (default the whole sound), hp (extra highpass) }
 export function burst(o) {
   const ctx = A.ctx
-  const t = o.t ?? ctx.currentTime
+  const t = o.t ?? now()
   const a = o.a ?? 0.002
   const d = o.d ?? 0.1
   const dur = a + (o.hold ?? 0) + d
@@ -84,7 +84,7 @@ export function burst(o) {
 // Pitched partial: { t, type, f, f2, glide, a, d, hold, gain, pan, verb, bus, lp }
 export function tone(o) {
   const ctx = A.ctx
-  const t = o.t ?? ctx.currentTime
+  const t = o.t ?? now()
   const a = o.a ?? 0.003
   const d = o.d ?? 0.2
   const dur = a + (o.hold ?? 0) + d
@@ -114,7 +114,7 @@ export function tone(o) {
 // beat: detune cents of the twin of each mode (metal); strike: noise click level.
 export function modal(o) {
   const ctx = A.ctx
-  const t = o.t ?? ctx.currentTime
+  const t = o.t ?? now()
   const out = ctx.createGain()
   out.gain.value = o.gain ?? 0.3
   route(out, o)

@@ -1,7 +1,7 @@
 import { ACESFilmicToneMapping, Clock, Group, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
 import { BOATS, CAMERA, DAILY, graphicsPreset, PHYSICS, RACE, RENDER, TRAILS } from './config.js'
 import * as bloxity from './bloxity.js'
-import { initNet, net, sendLoadout, sendPose, syncAvatar } from './net.js'
+import { initNet, net, onNetMessage, sendLoadout, sendPose, syncAvatar } from './net.js'
 import { inputState, install as installInput, onKey } from './input.js'
 import { installTouch } from './touch.js'
 import { createHud } from './hud.js'
@@ -359,6 +359,13 @@ const round = (n) => Math.round(n * 100) / 100
 // and saves the HUD's trophies + gems and every window's snapshot. Nothing is kept in the browser.
 initNet({ hud, stores: [rebirthWindow, petsWindow, engineWindow, boatsWindow, partnerWindow, giftsWindow, trailsScene, race, eggs] })
 
+// The plaza's leaderboards: the server's top lists + this player's ranks (on join, then every
+// minute), and this player's own live values on each board's bottom line.
+onNetMessage('leaderboard', (data) => plaza.setLeaderboard(data))
+setInterval(() => {
+  plaza.setMine({ rebirths: rebirthState.rebirths, trophies: hud.getStat('trophies'), energy: Math.floor(rebirthState.energy), playtime: net.playtime })
+}, 2000)
+
 // --- Loop -------------------------------------------------------------------
 const clock = new Clock()
 let shownLoading = true
@@ -454,5 +461,5 @@ if (import.meta.env.DEV) {
     resetPlayer({ x, y, z }, facing)
     syncYawToPlayer()
   }
-  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, toggleDay, teleport, rebirth: rebirthWindow, trails: trailsScene, gifts: giftsWindow, daily: dailyWindow, spin: spinWindow, hud, race, training, eggs, pets: petsWindow, net, remotes, companions }
+  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, toggleDay, teleport, rebirth: rebirthWindow, trails: trailsScene, gifts: giftsWindow, daily: dailyWindow, spin: spinWindow, hud, race, training, eggs, pets: petsWindow, net, remotes, companions, plaza }
 }

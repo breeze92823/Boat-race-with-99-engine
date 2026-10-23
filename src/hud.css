@@ -768,6 +768,47 @@
 .touch-ui .touch-top {
   display: none;
 }
+/* Compact right column on touch: the full-width AUTO bars and the row of three boost
+   circles covered the middle of a phone screen. The autos become two TRAIN / RACE
+   tiles side by side and the boosts (one action) fan into an overlapping stack. */
+.touch-ui .hud {
+  --rw: max(calc(210 * var(--u)), calc(2 * var(--tap) + 6px));
+}
+.touch-ui .hud-autos {
+  flex-direction: row;
+  gap: 6px;
+  margin-top: 0;
+}
+.touch-ui .hud-auto {
+  flex: 1 1 0;
+  min-width: var(--tap);
+  height: var(--tap);
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0;
+  border-radius: 10px;
+}
+.touch-ui .auto-icon {
+  width: 22px;
+  height: 22px;
+}
+.touch-ui .auto-label {
+  font-size: 10px;
+  --o: 1px;
+}
+.touch-ui .auto-pre {
+  display: none;
+}
+.touch-ui .hud-boosts {
+  margin: 0;
+}
+.touch-ui .hud-boost + .hud-boost {
+  margin-left: calc(var(--tap) * -0.55);
+}
+.touch-ui .boost-label {
+  display: none;
+}
 /* Boosts sit beside the hotbar on touch: the corner belongs to the joystick. */
 .touch-ui .hud-bl {
   position: absolute;

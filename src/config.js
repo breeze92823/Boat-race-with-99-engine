@@ -150,18 +150,27 @@ export const PLAZA = {
   lane: { width: 4.2, length: 7.6, rowZ: [-6.5, 4.3], colX: [6.3, 0, -6.3] },
   trains: [
     {
-      x: 20.5, z: 39, yaw: -0.15, firstSpeed: 1, tags: ['Rebirth', 'Wins'],
+      x: 20.5, z: 39, yaw: -0.15, firstSpeed: 1, boards: ['rebirths', 'trophies'],
       neon: ['#2f8cff', '#33ff6a', '#2f8cff', '#ff3bd8', '#ff2a2a', '#2f8cff'],
       req: ['0', '1K', '5K', '35K', '400K', '1M'],
       power: ['+1', '+3', '+5', '+10', '+20', '+30'],
     },
     {
-      x: -20.5, z: 39, yaw: 0.15, firstSpeed: 7, tags: ['Power', 'Speed'],
+      x: -20.5, z: 39, yaw: 0.15, firstSpeed: 7, boards: ['energy', 'playtime'],
       neon: ['#e8f4ff', '#33ff6a', '#27e8ff', '#ff3bd8', '#ff2a2a', '#2f8cff'],
       req: ['4M', '15M', '50M', '300M', '1.5B', '5B'],
       power: ['+40', '+50', '+60', '+70', '+80', '+90'],
     },
   ],
+  // The two leaderboards behind each station (`boards` above: dark on screen-left, then yellow),
+  // keyed by the saved stat the backend ranks (leaderboard.ts LEADERBOARD_STATS): title over the
+  // board, the stat column's heading and its colour. Rows come from the server's `leaderboard`.
+  leaderboards: {
+    rebirths: { title: '🔄 Rebirth', column: 'Rebirth', color: '#ff3d8b' },
+    trophies: { title: '🏆 Wins', column: 'Wins', color: '#ffe14a' },
+    energy: { title: '⚡ Power', column: 'Power', color: '#5fd0ff' },
+    playtime: { title: '⏱️ Playtime', column: 'Time', color: '#7dff6a' },
+  },
   vip: { x: 0, z: 42 },
   waterfall: { x: 0, z: 53.6, width: 11, height: 32 },
   // Kiosks just outside the stations' outer edges.
@@ -471,7 +480,7 @@ export const PETS = {
   equipSlots: 3, // pets equipped at once (the "1/3" counter)
   storage: 100, // pets owned at most (the "1/100" counter)
   craftCount: 5, // identical pets that Craft All turns into one of the next tier
-  starter: ['dog'], // a new player's pets (the first one is equipped)
+  starter: [], // a new player's pets (all equipped): none, every pet is hatched from eggs
   // Pet kinds: name, multiplier, rarity (the portrait disc colour). Looks live in pets.js.
   kinds: {
     dog: { name: 'Doggy', mult: 1.1, rarity: 'common' },
@@ -1002,6 +1011,12 @@ export const AUDIO = {
   duck: 0.45, // world (ambience + engine) level while a menu window is open
   maxVoices: 48, // one-shot sounds at once before low-priority ones are skipped
   maxVoicesTouch: 24,
+  // Output buffer (s, the AudioContext latencyHint): 'interactive' (~10 ms) crackles and drops out
+  // whenever a window open or a shader compile hogs the CPU; this much headroom rides those out.
+  // lead = s every one-shot is scheduled ahead, so a short main-thread stall doesn't clip its start.
+  latency: 0.04,
+  latencyTouch: 0.07,
+  lead: 0.02,
   // Generated impulse response: pre-delay s, early reflections [ms, gain], tail decay s (to -60 dB),
   // tail level, how fast the tail darkens, and the default send level.
   reverb: { seconds: 1.8, preDelay: 0.012, early: [[19, 0.5], [31, 0.35], [47, 0.28], [73, 0.2], [97, 0.12]], decay: 1.4, tail: 0.18, darken: 1.6, send: 0.9 },
