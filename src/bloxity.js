@@ -341,6 +341,36 @@ export function showMenu() {
   }
 }
 
+// Where Boxity draws its own controls over the game: the toolbar in the top-left corner and
+// the chat feed under it, as [{ id, left, top, width, height }] in CSS px. fn runs now and on
+// every change (resize, toolbar change). Without the SDK (dev mode, blocked CDN) it gets the
+// default footprint the SDK itself assumes until the portal reports, so the HUD is laid out
+// the same everywhere. Returns an unsubscribe.
+export function onReservedAreas(fn) {
+  try {
+    const off = sdk()?.ui?.onReservedAreasChange?.((areas) => fn(Array.isArray(areas) ? areas : []))
+    if (typeof off === 'function') return off
+  } catch {
+    // Fall back to the estimate below.
+  }
+  const update = () => fn(estimatedReservedAreas(window.innerWidth, window.innerHeight))
+  window.addEventListener('resize', update)
+  update()
+  return () => window.removeEventListener('resize', update)
+}
+
+// The SDK's estimate (legion-sdk ui.estimatedAreas): an 8 px margin round one row of buttons,
+// the whole width on narrow phones, and the chat feed under it.
+function estimatedReservedAreas(w, h) {
+  const compact = w < 640 || h <= 500
+  const toolbarHeight = 16 + (w < 640 ? 32 : w < 768 ? 40 : 44)
+  const chatWidth = compact ? Math.min(w * 0.7, 260) : Math.min(w * 0.8, 360)
+  return [
+    { id: 'toolbar', left: 0, top: 0, width: Math.min(w, w < 480 ? w : 330), height: toolbarHeight },
+    { id: 'chat', left: 0, top: toolbarHeight, width: Math.round(chatWidth + 8), height: compact ? 140 : 180 },
+  ]
+}
+
 export function requestFullscreen(on) {
   try {
     const SDK = sdk()

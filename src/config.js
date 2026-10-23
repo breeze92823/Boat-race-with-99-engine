@@ -6,6 +6,8 @@ export const GAME_TITLE = 'Boat Race with 99 Engine'
 
 // Forces the Bloxity SDK and avatar CDN to be treated as unavailable (see .env.example).
 export const DEV_MODE = import.meta.env.VITE_DEV_MODE === 'true'
+// Dev server only (never in a build): the VIP portal ignores its world requirement (worlds.js).
+export const DEV_WORLDS = import.meta.env.DEV && import.meta.env.VITE_DEV_WORLDS === 'true'
 
 // --- Server (net.js) -----------------------------------------------------------
 // The Colyseus server (../Boat-race-with-99-engine-backend) holds the only save: nothing is kept
@@ -172,6 +174,7 @@ export const PLAZA = {
     playtime: { title: '⏱️ Playtime', column: 'Time', color: '#7dff6a' },
   },
   vip: { x: 0, z: 42 },
+  portal: { open: '#4fc8ff', locked: '#ff4f6a' }, // the VIP arch's glowing fill (worlds.js)
   waterfall: { x: 0, z: 53.6, width: 11, height: 32 },
   // Kiosks just outside the stations' outer edges.
   golden: { x: 39, z: 37 },
@@ -405,6 +408,84 @@ export const LIGHT = {
   shadowRange: 40, // half-width of the sun's shadow box around the player
   lampColor: '#ffb35c',
   lampDistance: 22,
+}
+
+// --- Worlds (worlds.js, environment.js, city.js) -------------------------------------
+// One start island in two looks. The layout, colliders, shops, lanes, portal and races
+// are shared; a world only changes the scenery: ground, sea, sky, the far horizon, the
+// plaza's cliffs, the trees, the umbrella and the islet. The VIP portal on the plaza
+// (PLAZA.vip) moves the player between them: to a world with `req` once the player
+// has that many rebirths and that much Power (lightning) at the same time (after that
+// it stays open, saved by the server), back to the beach at any time.
+export const WORLDS = {
+  start: 'beach',
+  // Driving into this circle (radius m, `dz` m from the dais centre toward the spawn) uses the portal.
+  portal: { dz: -5.2, radius: 3.2, swapDelay: 0.12 }, // swapDelay: s into the white flash the world changes
+  list: {
+    beach: { name: 'Beach', sea: WATER.color, sky: TIME_OF_DAY },
+    city: {
+      name: 'City',
+      req: { rebirths: 10, power: 200 },
+      sea: '#1d78a6',
+      // Golden-hour skyline by day, neon purple by night (N).
+      sky: {
+        day: {
+          zenith: '#4560c4',
+          horizon: '#ffc4a0',
+          sunColor: '#ffd8b0',
+          sunIntensity: 2.2,
+          sunElevation: 26,
+          sunAzimuth: 35,
+          hemiSky: '#ffe2d2',
+          hemiGround: '#8e909a',
+          hemiIntensity: 0.8,
+          envIntensity: 0.5,
+          lampIntensity: 0,
+          stars: 0,
+          exposure: 0.95,
+        },
+        night: {
+          zenith: '#0b0724',
+          horizon: '#3c2860',
+          sunColor: '#b4acff',
+          sunIntensity: 0.5,
+          sunElevation: 38,
+          sunAzimuth: -60,
+          hemiSky: '#4a3c84',
+          hemiGround: '#1c1a26',
+          hemiIntensity: 0.4,
+          envIntensity: 0.3,
+          lampIntensity: 30,
+          stars: 0.45,
+          exposure: 1.15,
+        },
+      },
+    },
+  },
+}
+
+// The City look (city.js). Buildings stand on the beach's cliff footprints (PLAZA.cliffs, ISLET.rock)
+// with the same colliders; street trees and lamps take the palms' places.
+export const CITY = {
+  pavement: { base: '#d2cdc6', alt: '#c0bab2', joint: '#8a857e', tile: 16 }, // tile: m per texture tile (4x4 slabs)
+  slabSide: '#7e838d',
+  shallow: '#62c8da',
+  park: '#5a9f4a', // the islet's lawn
+  buildings: {
+    floor: 4, // m per storey (one row of windows); a window column every 2 m
+    walls: ['#f1e7d9', '#d9e3f1', '#f3d8ca', '#d0d9de', '#e9e1f3', '#c9d7ea', '#e8d2b8'],
+    glass: '#2b4f7e',
+    lit: '#ffd27a', // a lit window's glow
+    roof: '#5b606b',
+    podium: '#4a4f5a', // the shop floor along the foot of each block
+    rims: ['#ff4fd8', '#3ff0ff', '#ffd21a', '#7dff6a'], // neon along the roof edges
+    height: [1.5, 2.6], // a tower is this many times the cliff it replaces
+  },
+  // Far horizon: rings of towers instead of the beach's green hills.
+  skyline: { count: 54, distance: [270, 480], height: [45, 160], width: [18, 44], seed: 77 },
+  tree: { trunk: '#6e4b2c', leaf: '#3e9a3a', leafLight: '#79c94c', planter: '#9ba1ab' },
+  lamp: { pole: '#2a2d35', light: '#ffdca8' },
+  umbrella: ['#2a6fff', '#ffffff'],
 }
 
 // Default (fallback) character look, used only when player.glb cannot load.

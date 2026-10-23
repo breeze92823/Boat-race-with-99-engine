@@ -637,6 +637,89 @@ export function paintQuilt(base = '#ff5fa8', size = 128) {
   return c
 }
 
+// City pavement: `slabs` x `slabs` square paving slabs, each its own shade, with
+// sunken joints and a fine speckle -> colour + derived normal map (City ground).
+export function paintPavement({ base, alt, joint }, size = 512, slabs = 4, seed = 505) {
+  const rand = mulberry32(seed)
+  const shades = Array.from({ length: slabs * slabs }, () => rand())
+  const speckle = fbm(size, 32, 3, seed + 1)
+  const stain = fbm(size, 4, 3, seed + 2)
+  const height = new Float32Array(size * size)
+  const c = canvas(size)
+  const ctx = c.getContext('2d')
+  const img = ctx.createImageData(size, size)
+  const a = hexRgb(base)
+  const b = hexRgb(alt)
+  const j = hexRgb(joint)
+  const cell = size / slabs
+  const half = 2.2 // px: half a joint's width
+  for (let y = 0; y < size; y++) {
+    const gy = Math.floor(y / cell)
+    const dy = Math.min(y % cell, cell - (y % cell))
+    for (let x = 0; x < size; x++) {
+      const gx = Math.floor(x / cell)
+      const dx = Math.min(x % cell, cell - (x % cell))
+      const edge = Math.min(1, Math.max(0, (Math.min(dx, dy) - half) / 1.5)) // 0 in a joint
+      const i = y * size + x
+      const s = speckle[i]
+      height[i] = edge * 0.5 + s * 0.12
+      const t = shades[gy * slabs + gx] * 0.7 + s * 0.3
+      const dirt = 1 - Math.max(0, stain[i] - 0.55) * 0.35
+      for (let ch = 0; ch < 3; ch++) {
+        const v = (a[ch] + (b[ch] - a[ch]) * t) * dirt
+        img.data[i * 4 + ch] = v + (j[ch] - v) * (1 - edge)
+      }
+      img.data[i * 4 + 3] = 255
+    }
+  }
+  ctx.putImageData(img, 0, 0)
+  return { color: c, normal: heightToNormal(height, size, 1.4) }
+}
+
+// Building facade: `cols` window columns x `rows` storeys per tile on a white wall
+// (the material's colour tints it), plus a black canvas with only the lit windows
+// (the emissive map). The top-left pixel is plain wall: roofs and floors sample it.
+export function paintFacade(glass = '#2b4f7e', size = 512, cols = 8, rows = 4, seed = 606) {
+  const rand = mulberry32(seed)
+  const color = canvas(size)
+  const lit = canvas(size)
+  const c = color.getContext('2d')
+  const l = lit.getContext('2d')
+  c.fillStyle = '#ffffff'
+  c.fillRect(0, 0, size, size)
+  l.fillStyle = '#000000'
+  l.fillRect(0, 0, size, size)
+  const cw = size / cols
+  const ch = size / rows
+  for (let r = 0; r < rows; r++) {
+    // A darker band where each floor slab meets the wall.
+    c.fillStyle = 'rgba(0, 0, 0, 0.08)'
+    c.fillRect(0, (r + 1) * ch - ch * 0.08, size, ch * 0.08)
+    for (let k = 0; k < cols; k++) {
+      const x = k * cw + cw * 0.2
+      const y = r * ch + ch * 0.16
+      const w = cw * 0.6
+      const h = ch * 0.62
+      c.fillStyle = 'rgba(0, 0, 0, 0.35)' // frame
+      c.fillRect(x - 2, y - 2, w + 4, h + 4)
+      const g = c.createLinearGradient(0, y, 0, y + h)
+      g.addColorStop(0, '#c9e4ff')
+      g.addColorStop(0.35, glass)
+      g.addColorStop(1, glass)
+      c.fillStyle = g
+      c.fillRect(x, y, w, h)
+      if (rand() < 0.38) {
+        const warm = 0.75 + rand() * 0.25
+        l.fillStyle = `rgb(${255 * warm}, ${236 * warm}, ${190 * warm})`
+        l.fillRect(x, y, w, h)
+        c.fillStyle = 'rgba(255, 222, 150, 0.55)'
+        c.fillRect(x, y, w, h)
+      }
+    }
+  }
+  return { color, lit }
+}
+
 // Two-tone checkerboard (2x2 squares per tile), e.g. the pink statue walkway.
 export function paintChecker(a = '#ff5fa8', b = '#ff7fbc', size = 64) {
   const c = document.createElement('canvas')

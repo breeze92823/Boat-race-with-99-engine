@@ -7,7 +7,6 @@ import {
   CylinderGeometry,
   DoubleSide,
   ExtrudeGeometry,
-  Float32BufferAttribute,
   Group,
   InstancedMesh,
   LatheGeometry,
@@ -26,7 +25,7 @@ import {
 import { LOBBY, SPAWN, WATER } from './config.js'
 import { makeEngine } from './boat.js'
 import { paintChecker, paintChevrons, paintFade, paintSoftDot } from './textures.js'
-import { buildPalm, fontReady, glow, label, neon, put, solidBox, solidPole, std } from './propkit.js'
+import { fontReady, glow, label, neon, put, solidBox, solidPole, std } from './propkit.js'
 import { createEmitter } from './particles.js'
 
 // Everything standing on the lobby beach, laid out like the reference shot
@@ -39,9 +38,8 @@ import { createEmitter } from './particles.js'
 //    front of the taller wall (name + stat tags, coloured auras and sparkles)
 //  - on the left: the Engine Upgrade machine (caged, flaming, smoking, a
 //    glowing gold ring, a parked log raft), two engine rockets hovering over
-//    glowing pads with sparkles, a
-//    striped beach umbrella
-//  - palm trees around the beach
+//    glowing pads with sparkles
+// The palms and the striped umbrella are scenery, built per world (environment.js).
 // Solid props get fixed colliders so the boat cannot drive through them.
 const G = LOBBY.gate
 const C = LOBBY.colors
@@ -524,35 +522,6 @@ function buildUpgrade(root, animated, spots) {
   solidBox(1.3, 0.5, 1.3, raft.position.x, 0.5, raft.position.z, raft.rotation.y)
 }
 
-// --- Beach umbrella -------------------------------------------------------------------
-function buildUmbrella(root) {
-  const { x, z, scale } = LOBBY.umbrella
-  const g = new Group()
-  g.position.set(x, 0, z)
-  g.scale.setScalar(scale)
-  g.rotation.set(0.25, 0.4, 0.3) // tilted, like it was pushed into the sand at an angle
-  root.add(g)
-  put(g, new CylinderGeometry(0.07, 0.07, 5.4, 10), std('#d8dce4', { metalness: 0.5, roughness: 0.35 }), 0, 2.7, 0)
-  // Canopy: an open cone with alternating red/white panels (per-face vertex colours).
-  const cone = new ConeGeometry(4.4, 1.5, 16, 1, true).toNonIndexed()
-  const pos = cone.attributes.position
-  const colors = []
-  const a = new Color('#e3262e')
-  const b = new Color('#ffffff')
-  for (let i = 0; i < pos.count; i += 3) {
-    const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3
-    const cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3
-    const panel = Math.floor(((Math.atan2(cz, cx) + Math.PI) / (Math.PI * 2)) * 16)
-    const c = panel % 2 ? a : b
-    for (let k = 0; k < 3; k++) colors.push(c.r, c.g, c.b)
-  }
-  cone.setAttribute('color', new Float32BufferAttribute(colors, 3))
-  cone.computeVertexNormals()
-  put(g, cone, std('#ffffff', { vertexColors: true, side: DoubleSide, roughness: 0.7 }), 0, 5.3, 0)
-  put(g, new SphereGeometry(0.16, 10, 8), std('#e3262e'), 0, 6.1, 0)
-  solidPole(0.3 * scale, 3, x, z)
-}
-
 export function createLobby(scene) {
   const root = new Group()
   root.name = 'lobby'
@@ -566,8 +535,6 @@ export function createLobby(scene) {
   buildStatues(root, spots.statues)
   buildUpgrade(root, animated, spots.upgrade)
   for (const r of LOBBY.rockets) buildRocketPad(root, animated, spots.rockets, r)
-  buildUmbrella(root)
-  LOBBY.palms.forEach(([x, z, h, lx, lz], i) => buildPalm(root, x, z, h, lx, lz, 100 + i))
 
   return {
     spots,

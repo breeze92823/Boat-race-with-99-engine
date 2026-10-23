@@ -6,18 +6,21 @@
    --uiw-u is 1px on the 1913x990 reference, scales with the screen like a Roblox
    ScreenGui, never drops below ~0.62px on tablets and always fits the window on
    screen (phones). A window sets its own design size with --uiw-w / --uiw-h on
-   its overlay (frame width / frame height without the title overhang). */
+   its overlay (frame width / frame height without the title overhang).
+   --uiw-top (px, set by uiWindow.js) keeps the frame, title and X clear of Boxity's
+   toolbar: the window is fitted into the screen below it. */
 /* Defaults at zero specificity, so a window's own class always wins whatever
    order the stylesheets load in. */
 :where(.uiw-overlay) {
   --uiw-w: 886;
   --uiw-h: 570;
+  --uiw-top: 0px;
 }
 .uiw-overlay {
   --uiw-ink: #1d1a22;
   --uiw-u: min(
     calc((100vw - 32px) / (var(--uiw-w) + 80)),
-    calc((100vh - 48px) / (var(--uiw-h) + 60)),
+    calc((100vh - 48px - var(--uiw-top)) / (var(--uiw-h) + 60)),
     max(min(calc(100vw / 1913), calc(100vh / 990)), 0.62px)
   );
   position: fixed;
@@ -26,7 +29,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: calc(44 * var(--uiw-u)) 0 0;
+  padding: calc(var(--uiw-top) + 44 * var(--uiw-u)) 0 0;
   box-sizing: border-box;
   background: rgba(10, 30, 60, 0.06);
   -webkit-backdrop-filter: blur(6px);
@@ -42,7 +45,7 @@
   .uiw-overlay {
     --uiw-u: min(
       calc((100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)) / (var(--uiw-w) + 80)),
-      calc((100dvh - 48px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) / (var(--uiw-h) + 60)),
+      calc((100dvh - 48px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--uiw-top)) / (var(--uiw-h) + 60)),
       max(min(calc(100vw / 1913), calc(100dvh / 990)), 0.62px)
     );
   }

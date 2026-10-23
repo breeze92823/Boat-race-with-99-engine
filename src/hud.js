@@ -6,6 +6,7 @@
 //   bottom       - the three-row race distance bar with every racer's head
 // Everything is sized in reference pixels times --u (set on resize), so it keeps
 // the reference proportions on any screen; hud.css adapts it for touch + portrait.
+// The top-left corner is Boxity's (toolbar + chat feed): blocks slide down clear of it (setReserved).
 import './hud.css'
 import { clamp, HUD } from './config.js'
 import { head, ICONS, RIBBON } from './hudIcons.js'
@@ -68,7 +69,7 @@ function formatTime(ms) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(r).padStart(3, '0')}`
 }
 
-// actions: { menu, claim, daily (the calendar), rebirth, pets, boats, engine, partner, trail,
+// actions: { claim, daily (the calendar), rebirth, pets, boats, engine, partner, trail,
 // autoTrain(on), autoRace(on), boosts (the three boost circles) }, all optional; a menu
 // tile calls the action named after it.
 export function createHud(actions = {}) {
@@ -231,6 +232,49 @@ export function createHud(actions = {}) {
   root.append(podium, top, left, right, bottom)
   document.body.appendChild(root)
 
+  // --- Boxity's reserved areas (setReserved) ------------------------------------------------------
+  // The portal draws its toolbar and chat feed over the top-left corner (the whole top edge on
+  // narrow phones). Each block that would sit under them slides down until it clears them (CSS
+  // `translate`, so its own positioning is untouched), and below any block above it that moved.
+  // Re-laid out on resize, when a block changes size (podium shown, scene mode) and when the
+  // HUD's or the page's classes change (portrait, touch-ui, uiw-open move blocks around).
+  const RESERVED_GAP = 8 // px kept clear under a reserved area
+  const avoiders = [tr, podium, left, right] // top to bottom: a moved block pushes the ones under it
+  let reserved = []
+  let layoutQueued = 0
+  const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+  function layoutReserved() {
+    layoutQueued = 0
+    for (const e of avoiders) e.style.translate = ''
+    const blocks = reserved.map((a) => ({ left: a.left, right: a.left + a.width, top: a.top, bottom: a.top + a.height }))
+    for (const e of avoiders) {
+      const r = e.getBoundingClientRect()
+      if (!r.width || !r.height || getComputedStyle(e).visibility === 'hidden') continue // not shown (uiw-open hides all but the counters)
+      let push = 0
+      for (let moved = true; moved; ) {
+        moved = false
+        const box = { left: r.left, right: r.right, top: r.top + push, bottom: r.bottom + push }
+        const hit = blocks.find((b) => overlaps(box, b))
+        if (hit) {
+          push = hit.bottom + RESERVED_GAP - r.top // always grows, so this ends
+          moved = true
+        }
+      }
+      if (push <= 0) continue
+      e.style.translate = `0 ${push}px`
+      blocks.push({ left: r.left, right: r.right, top: r.top + push, bottom: r.bottom + push })
+    }
+  }
+  // Batched into one pass; a timeout rather than a frame so it also lands in a background tab.
+  const relayout = () => {
+    layoutQueued ||= setTimeout(layoutReserved)
+  }
+  const sized = new ResizeObserver(relayout)
+  for (const e of avoiders) sized.observe(e)
+  const classes = new MutationObserver(relayout)
+  classes.observe(root, { attributes: true, attributeFilter: ['class'] })
+  classes.observe(document.body, { attributes: true, attributeFilter: ['class'] })
+
   // --- Sizing ------------------------------------------------------------------------------------------
   function resize() {
     const vv = window.visualViewport
@@ -240,6 +284,7 @@ export function createHud(actions = {}) {
     root.style.setProperty('--u', `${u}px`)
     root.classList.toggle('portrait', h > w)
     root.classList.toggle('short', h <= w && h < 500) // phone landscape
+    relayout()
   }
   window.addEventListener('resize', resize)
   window.visualViewport?.addEventListener('resize', resize)
@@ -390,6 +435,11 @@ export function createHud(actions = {}) {
     },
     // Scene mode (the Trails scene): only the round buttons stay.
     setScene: (on) => root.classList.toggle('scene', on),
+    // Boxity's toolbar / chat rectangles ([{ left, top, width, height }], CSS px) to keep clear of.
+    setReserved(areas) {
+      reserved = areas
+      relayout()
+    },
     // Show this time (ms) on the timer instead of the time since load; null goes back.
     setTimer(ms) {
       timerMs = ms

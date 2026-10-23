@@ -3,6 +3,7 @@ import {
   BoxGeometry,
   BufferGeometry,
   CanvasTexture,
+  ConeGeometry,
   Color,
   CylinderGeometry,
   DoubleSide,
@@ -129,7 +130,8 @@ function frondGeometry() {
 
 const UP = new Vector3(0, 1, 0)
 // Built 10 m tall, then scaled to `height` so trunk girth and crown grow with it.
-export function buildPalm(root, x, z, treeHeight, leanX, leanZ, seed, y = 0) {
+// solid: false for scenery whose collider is added elsewhere (environment.js).
+export function buildPalm(root, x, z, treeHeight, leanX, leanZ, seed, y = 0, solid = true) {
   const rand = mulberry32(seed)
   const s = treeHeight / 10
   const height = 10
@@ -172,8 +174,10 @@ export function buildPalm(root, x, z, treeHeight, leanX, leanZ, seed, y = 0) {
     const a = (i / 3) * Math.PI * 2
     put(crown, nut, nutMat, Math.cos(a) * 0.3, -0.3, Math.sin(a) * 0.3)
   }
-  if (y === 0) solidPole(0.5 * s, 4 * s, x, z) // palms up on the cliffs are out of reach
+  if (solid && y === 0) palmCollider(x, z, treeHeight) // palms up on the cliffs are out of reach
 }
+// A palm's trunk collider (also the City's street tree or lamp in its place).
+export const palmCollider = (x, z, treeHeight) => solidPole((0.5 * treeHeight) / 10, (4 * treeHeight) / 10, x, z)
 
 // --- Grass-capped rock cliffs ---------------------------------------------------------------------------
 // A subdivided box pushed in and out by a smooth function of position (so the
@@ -199,7 +203,13 @@ function lumpyBox(w, h, d, seed, amount, colorAt) {
   return geo
 }
 
-// solid: false for decoration that never meets the player (race scenery), which gets no collider.
+// A cliff's collider (also the footprint of the City building standing in its place).
+export function cliffCollider([x, z, w, d, h, yaw], baseY = 0) {
+  solidBox(w / 2 + 0.6, h / 2, d / 2 + 0.6, x, baseY + h / 2, z, yaw)
+}
+
+// solid: false for decoration that never meets the player (race scenery, the
+// start island's scenery: environment.js adds its colliders once), which gets no collider.
 export function buildCliff(root, [x, z, w, d, h, yaw], seed, baseY = 0, solid = true) {
   const g = new Group()
   g.position.set(x, baseY, z)
@@ -222,5 +232,34 @@ export function buildCliff(root, [x, z, w, d, h, yaw], seed, baseY = 0, solid = 
   }
   capGeo.computeVertexNormals()
   put(g, capGeo, std('#ffffff', { vertexColors: true, flatShading: true, roughness: 0.9 }), 0, h - capH / 2 + 0.6, 0)
-  if (solid) solidBox(w / 2 + 0.6, h / 2, d / 2 + 0.6, x, baseY + h / 2, z, yaw)
+  if (solid) cliffCollider([x, z, w, d, h, yaw], baseY)
+}
+
+// --- Beach umbrella -------------------------------------------------------------------
+// Tilted like it was pushed into the sand at an angle; `colors` = its two panel colours.
+// Visual only: environment.js adds its pole's collider.
+export function buildUmbrella(root, { x, z, scale }, [colorA, colorB]) {
+  const g = new Group()
+  g.position.set(x, 0, z)
+  g.scale.setScalar(scale)
+  g.rotation.set(0.25, 0.4, 0.3)
+  root.add(g)
+  put(g, new CylinderGeometry(0.07, 0.07, 5.4, 10), std('#d8dce4', { metalness: 0.5, roughness: 0.35 }), 0, 2.7, 0)
+  // Canopy: an open cone with alternating panels (per-face vertex colours).
+  const cone = new ConeGeometry(4.4, 1.5, 16, 1, true).toNonIndexed()
+  const pos = cone.attributes.position
+  const colors = []
+  const a = new Color(colorA)
+  const b = new Color(colorB)
+  for (let i = 0; i < pos.count; i += 3) {
+    const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3
+    const cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3
+    const panel = Math.floor(((Math.atan2(cz, cx) + Math.PI) / (Math.PI * 2)) * 16)
+    const c = panel % 2 ? a : b
+    for (let k = 0; k < 3; k++) colors.push(c.r, c.g, c.b)
+  }
+  cone.setAttribute('color', new Float32BufferAttribute(colors, 3))
+  cone.computeVertexNormals()
+  put(g, cone, std('#ffffff', { vertexColors: true, side: DoubleSide, roughness: 0.7 }), 0, 5.3, 0)
+  put(g, new SphereGeometry(0.16, 10, 8), std(colorA), 0, 6.1, 0)
 }

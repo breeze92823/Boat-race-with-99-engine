@@ -1,8 +1,9 @@
 import { CanvasTexture, Color, CylinderGeometry, DoubleSide, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PlaneGeometry, RepeatWrapping, SphereGeometry, SRGBColorSpace, Vector3 } from 'three'
 import { BEACH, CAMERA, clamp, FOG, HUD, LOBBY, RACE, WATER } from './config.js'
 import { remoteRacers, sendRace } from './net.js'
-import { inputState, setLockAllowed } from './input.js'
+import { inputState, isLocked } from './input.js'
 import { getCameraSensitivity } from './camera.js'
+import { isFirstPerson, onModeChanged, setMode } from './modes.js'
 import { player, respawn } from './player.js'
 import { closeTopWindow } from './uiWindow.js'
 import { boosts } from './boosts.js'
@@ -138,8 +139,17 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
   // boost: boosts() when the race started; lastTop: the previous race's top speed (for the speed-up banner);
   // step / early: this race's checkpoint spacing and the early checkpoints below it; best: the personal best
   // (studs), record: this race has passed it; boostTap: the tap boost (0..RACE.tap.max);
-  // yaw / pitch: the dragged camera orbit on top of the chase framing (0 = straight behind).
-  const s = { racing: false, t: 0, studs: 0, speed: 0, top: 0, x: 0, y: 0, z: 0, scroll: 0, next: 0, earned: 0, camX: 0, sx: 0, sy: 0, boost: null, lastTop: 0, step: 1000, payCap: Infinity, early: CP.early, best: 0, record: false, boostTap: 0, yaw: 0, pitch: 0 }
+  // yaw / pitch: the dragged camera orbit on top of the chase framing (0 = straight behind);
+  // in first person the look direction off straight down the lane (+ pitch = looking down).
+  // zoom / zoomEased: wheel / pinch metres added to the chase boom; reach: the framing's own boom (m).
+  const s = { racing: false, t: 0, studs: 0, speed: 0, top: 0, x: 0, y: 0, z: 0, scroll: 0, next: 0, earned: 0, camX: 0, sx: 0, sy: 0, boost: null, lastTop: 0, step: 1000, payCap: Infinity, early: CP.early, best: 0, record: false, boostTap: 0, yaw: 0, pitch: 0, zoom: 0, zoomEased: 0, reach: 0 }
+  // V / CAM / the wheel switch modes mid-race too: first person starts looking down the lane,
+  // backing out of it starts the boom a little past its inner end (like camera.js).
+  onModeChanged((mode) => {
+    if (!s.racing) return
+    s.pitch = 0
+    if (mode === 'character' && s.reach) s.zoom = s.zoomEased = CAMERA.minDistance + 2 - s.reach
+  })
   // Studs of checkpoint i this race, and what it pays before the Wins boost.
   const checkpointAt = (i) => (i < s.early.length ? s.early[i] : (i - s.early.length + 1) * s.step)
   // Past top speed x CP.paySeconds every checkpoint pays the same (payCap: those studs).
@@ -172,8 +182,9 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
     sfx.tapSpray()
   }
   // Any tap or click that a HUD control did not take (they stop propagation) boosts mid-race.
+  // With the cursor grabbed (pointer lock) a click is still a tap, but has no spot for the ripple.
   window.addEventListener('pointerdown', (e) => {
-    if (s.racing && e.button === 0) tap(e.clientX, e.clientY)
+    if (s.racing && e.button === 0) isLocked() ? tap() : tap(e.clientX, e.clientY)
   })
   const halfLane = G.halfWidth - RACE.laneMargin
 
@@ -187,9 +198,9 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
     player.racing = true
     player.facing = Math.PI
     player.velocity.x = player.velocity.y = player.velocity.z = 0
-    s.t = s.studs = s.speed = s.scroll = s.next = s.earned = s.boostTap = s.yaw = s.pitch = 0
+    s.t = s.studs = s.speed = s.scroll = s.next = s.earned = s.boostTap = s.yaw = s.pitch = s.zoom = s.zoomEased = 0
     inputState.jump = false // a Space held into the gate is not a tap
-    inputState.look.dx = inputState.look.dy = 0 // a lobby drag must not swing the race cam
+    inputState.look.dx = inputState.look.dy = inputState.zoom = 0 // a lobby drag / wheel must not swing the race cam
     s.boost = boosts()
     s.top = (RACE.baseSpeed + RACE.speedPerBolt * hud.getStat('wins')) * s.boost.speed
     s.step = stepFor(s.top)
@@ -207,7 +218,6 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
     lane.visible = true
     scenery.start()
     ui.setRace(true)
-    setLockAllowed(false)
     setRacing(true)
     sfx.raceStart()
     engineRev()
@@ -224,7 +234,6 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
     world.setScroll(0)
     scenery.stop()
     ui.setRace(false)
-    setLockAllowed(true)
     setRacing(false)
     s.boostTap = 0
     // A new personal best pays a bonus on top (straight into the counter).
@@ -329,7 +338,9 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
     tapBoost: () => s.boostTap,
     // Chase cam: behind the boat and above it, looking down the lane. Dragging
     // (mouse, or the touch look zone) swings it around the boat; the framing
-    // turns with it, so at yaw = pitch = 0 it is the plain chase shot.
+    // turns with it, so at yaw = pitch = 0 it is the plain chase shot. The wheel /
+    // pinch zooms the boom (CAMERA.minDistance..maxDistance, like camera.js) and
+    // crosses into first person at its inner end; V / CAM toggle first person too.
     camera(camera, dt) {
       const C = camera.aspect < 1 || window.innerHeight < RACE.camera.compactHeight ? COMPACT_CAM : RACE.camera
       s.camX += (s.x - s.camX) * (1 - Math.exp(-C.follow * dt))
@@ -340,15 +351,37 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
       // Boom from a pivot above the boat: the chase offset in polar form, plus the drag.
       const py = s.y + ORBIT.pivot
       const up = C.height - ORBIT.pivot
-      const reach = Math.hypot(up, C.distance)
-      const base = Math.atan2(up, C.distance)
-      s.pitch = clamp(s.pitch, ORBIT.minPitch - base, ORBIT.maxPitch - base)
-      const pitch = base + s.pitch
-      const sin = Math.sin(s.yaw)
-      const cos = Math.cos(s.yaw)
-      const flat = Math.cos(pitch) * reach
-      camera.position.set(s.camX + sin * flat, py + Math.sin(pitch) * reach, s.z + cos * flat)
-      camera.lookAt(s.camX - sin * C.lookAhead, s.y + C.lookHeight, s.z - cos * C.lookAhead)
+      s.reach = Math.hypot(up, C.distance)
+      const fp = isFirstPerson()
+      if (inputState.zoom !== 0) {
+        if (fp) {
+          if (inputState.zoom > 0) setMode('character')
+        } else {
+          const next = s.reach + s.zoom + inputState.zoom * CAMERA.zoomStep
+          if (next < CAMERA.minDistance && inputState.zoom < 0) setMode('player')
+          else s.zoom = clamp(next, CAMERA.minDistance, CAMERA.maxDistance) - s.reach
+        }
+        inputState.zoom = 0
+      }
+      if (isFirstPerson()) {
+        // The rider's eyes, steady on the boat (no follow lag: it reads as input delay).
+        s.pitch = clamp(s.pitch, -CAMERA.firstPersonPitch, CAMERA.firstPersonPitch)
+        const eyeY = s.y + player.dims.height * CAMERA.eyeHeight
+        const cp = Math.cos(s.pitch)
+        camera.position.set(s.x, eyeY, s.z)
+        camera.lookAt(s.x - Math.sin(s.yaw) * cp, eyeY - Math.sin(s.pitch), s.z - Math.cos(s.yaw) * cp)
+      } else {
+        s.zoomEased += (s.zoom - s.zoomEased) * (1 - Math.exp(-CAMERA.zoomEase * dt))
+        const reach = Math.max(1, s.reach + s.zoomEased)
+        const base = Math.atan2(up, C.distance)
+        s.pitch = clamp(s.pitch, ORBIT.minPitch - base, ORBIT.maxPitch - base)
+        const pitch = base + s.pitch
+        const sin = Math.sin(s.yaw)
+        const cos = Math.cos(s.yaw)
+        const flat = Math.cos(pitch) * reach
+        camera.position.set(s.camX + sin * flat, py + Math.sin(pitch) * reach, s.z + cos * flat)
+        camera.lookAt(s.camX - sin * C.lookAhead, s.y + C.lookHeight, s.z - cos * C.lookAhead)
+      }
       camera.updateMatrixWorld()
       screenPos.set(s.x, s.y + 1, s.z).project(camera)
       s.sx = ((screenPos.x + 1) / 2) * window.innerWidth

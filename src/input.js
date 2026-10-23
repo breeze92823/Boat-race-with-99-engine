@@ -1,5 +1,6 @@
 // Keyboard + mouse. WASD/arrows move (camera-relative, consumed by player.js),
-// mouse look while pointer-locked (right-drag where lock is refused) and wheel
+// mouse look while pointer-locked (click grabs, Esc releases; drag where it is
+// refused or not yet granted) and wheel
 // zoom (consumed by camera.js), edge-triggered actions cleared by their consumer.
 // Touch controls (touch.js) write look/zoom/jump directly and move/sprint via
 // setTouchMove/setTouchSprint, which are merged with the keys here.
@@ -19,19 +20,12 @@ const held = new Set()
 const keyActions = new Map() // code -> fn, for one-shot keys (mode toggle, day/night...)
 let orbiting = false // right-drag fallback where pointer lock is refused
 let canvas = null
-let lockEverGranted = false
 const touch = { x: 0, z: 0, sprint: false }
 
 export const isLocked = () => !!canvas && document.pointerLockElement === canvas
-let lockAllowed = true
-// Races turn pointer lock off (clicks are taps there, and Leave needs the cursor).
-export function setLockAllowed(on) {
-  lockAllowed = on
-  if (!on && isLocked()) document.exitPointerLock?.()
-}
 // Pointer lock can reject (sandboxed frame, post-Escape cooldown); that is not a fault.
 export function requestLock() {
-  if (!canvas || isLocked() || !lockAllowed) return
+  if (!canvas || isLocked()) return
   const r = canvas.requestPointerLock?.()
   if (r instanceof Promise) r.catch(() => {})
 }
@@ -68,10 +62,7 @@ export function setTouchSprint(on) {
 export function install(showMenu, canvasEl) {
   canvas = canvasEl
   document.addEventListener('pointerlockchange', () => {
-    if (isLocked()) {
-      lockEverGranted = true
-      orbiting = false
-    }
+    if (isLocked()) orbiting = false
   })
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return
@@ -92,10 +83,13 @@ export function install(showMenu, canvasEl) {
   })
   window.addEventListener('pointerdown', (e) => {
     const onWorld = e.target === canvas
-    if (e.button === 2 && (!lockEverGranted || !lockAllowed)) orbiting = true
+    if (e.button === 2 && !isLocked()) orbiting = true
     if (e.button === 0 && onWorld && e.pointerType === 'mouse') {
-      if (lockAllowed) requestLock() // the first click takes the cursor (never on touch: there is no cursor)
-      else orbiting = true // mid-race: no lock, so a left-drag on the world turns the camera
+      // A click on the world takes the cursor (Esc gives it back; never on touch: there is no
+      // cursor), also mid-race, where the click is a boost tap too. Until the lock lands (or where
+      // it is refused) the drag turns the camera instead.
+      requestLock()
+      if (!isLocked()) orbiting = true
     }
   })
   window.addEventListener('pointerup', (e) => {

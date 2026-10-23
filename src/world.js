@@ -15,13 +15,15 @@ import {
 import { BEACH, ISLET, WATER } from './config.js'
 import { RAPIER, addFixed } from './physics.js'
 import { mulberry32, paintCrackedSand, paintWaterNormal, toTexture } from './textures.js'
-import { buildCliff, buildPalm } from './propkit.js'
+import { buildCliff, buildPalm, cliffCollider } from './propkit.js'
 
 // The lobby ground: a pale cracked-sand beach slab in a bright cartoon sea,
 // with green hills on the far left horizon, a rocky islet with palms to the
-// east, and puffy clouds in the sky.
-// Physically the beach is one convex-hull collider plus an invisible fence on
-// every edge (the race itself starts past the gate, which is closed for now).
+// east, and puffy clouds in the sky. The sea and clouds are shared by every
+// world (createWorld); the land is built per world (buildBeachLand here, the
+// City's in city.js, both through buildSlab; environment.js shows one).
+// Physically the land is one convex-hull collider plus an invisible fence on
+// every edge (landColliders, the same in every world).
 //
 // Texture techniques used here:
 //  - sand: tileable Voronoi cells + cracks -> colour + derived normal map,
@@ -111,14 +113,12 @@ function makeClouds() {
   return group
 }
 
-export function createWorld(scene) {
+// The slab of land the start island stands on (sand on the beach, paving in the City): `top` is
+// the material of its flat top, `side` the colour of its rounded edge, `shallow` the lighter
+// water band hugging it. Visual only (landColliders is shared by every world).
+export function buildSlab(root, top, side, shallow) {
   const outline = beachOutline()
   const bevel = 0.6
-
-  // Sand slab: flat cracked top, rounded edge, darker wet sides.
-  const sand = paintCrackedSand()
-  const sandColor = toTexture(sand.color, { repeat: 1 / BEACH.tile, srgb: true })
-  const sandNormal = toTexture(sand.normal, { repeat: 1 / BEACH.tile })
   const slabGeo = new ExtrudeGeometry(outlineShape(outline), {
     depth: BEACH.depth,
     bevelEnabled: true,
@@ -128,21 +128,77 @@ export function createWorld(scene) {
     curveSegments: 1,
   })
   slabGeo.rotateX(-Math.PI / 2)
-  const slab = new Mesh(slabGeo, [
-    new MeshStandardMaterial({ map: sandColor, normalMap: sandNormal, normalScale: new Vector2(0.6, 0.6), roughness: 1, metalness: 0 }),
-    new MeshStandardMaterial({ color: '#dcc08a', roughness: 1 }),
-  ])
+  const slab = new Mesh(slabGeo, [top, new MeshStandardMaterial({ color: side, roughness: 1 })])
   slab.position.y = -(BEACH.depth + bevel)
   slab.receiveShadow = true
 
-  // Shallow water: a lighter band just around the sand.
+  // Shallow water: a lighter band just around the land.
   const cz = (BEACH.front + BEACH.back) / 2
   const shallowGeo = new ShapeGeometry(outlineShape(outline, 1.12, cz))
   shallowGeo.rotateX(-Math.PI / 2)
-  const shallow = new Mesh(shallowGeo, new MeshStandardMaterial({ color: WATER.shallow, roughness: 0.3, transparent: true, opacity: 0.55, depthWrite: false }))
-  shallow.position.y = WATER.level + 0.04
-  shallow.renderOrder = 1
+  const band = new Mesh(shallowGeo, new MeshStandardMaterial({ color: shallow, roughness: 0.3, transparent: true, opacity: 0.55, depthWrite: false }))
+  band.position.y = WATER.level + 0.04
+  band.renderOrder = 1
+  root.add(slab, band)
+}
 
+// The beach world's land: the cracked-sand slab, green hills on the far left
+// horizon and the rocky islet with its palms.
+export function buildBeachLand(root) {
+  // Sand slab: flat cracked top, rounded edge, darker wet sides.
+  const sand = paintCrackedSand()
+  const sandColor = toTexture(sand.color, { repeat: 1 / BEACH.tile, srgb: true })
+  const sandNormal = toTexture(sand.normal, { repeat: 1 / BEACH.tile })
+  const top = new MeshStandardMaterial({ map: sandColor, normalMap: sandNormal, normalScale: new Vector2(0.6, 0.6), roughness: 1, metalness: 0 })
+  buildSlab(root, top, '#dcc08a', WATER.shallow)
+
+  // Far scenery: green islands on the left horizon, a hazy mountain behind them.
+  root.add(
+    ...makeHill(-250, -300, 120, 30, 60, '#4dbb3c', 11),
+    ...makeHill(-130, -360, 55, 18, 35, '#45ad37', 12),
+    ...makeHill(-400, -470, 150, 60, 80, '#6f9fd6', 13),
+  )
+
+  // The islet: a low green hill with a grass-capped rock and two palms on it.
+  const I = ISLET
+  const islet = new Group()
+  islet.position.set(I.x, 0, I.z)
+  root.add(islet, ...makeHill(I.x, I.z, I.hill.rx, I.hill.ry, I.hill.rz, '#4dbb3c', 14))
+  buildCliff(root, isletRock(), 5, WATER.level - 1, false)
+  const rockTop = WATER.level - 1 + I.rock[4]
+  buildPalm(islet, -4, -2, 11, -0.3, 0.1, 50, rockTop)
+  buildPalm(islet, 6, 3, 9, 0.2, -0.2, 51, rockTop)
+}
+
+// The islet's rock (or the City's tower on it) in buildCliff's [x, z, w, d, h, yaw], world x / z.
+export function isletRock() {
+  const [rx, rz, ...rock] = ISLET.rock // offset from the islet centre
+  return [ISLET.x + rx, ISLET.z + rz, ...rock]
+}
+
+// Collision for the land (every world): the slab as a convex hull, a fence along every edge
+// and the islet's rock.
+export function landColliders() {
+  const outline = beachOutline()
+  const hull = []
+  for (const [x, z] of outline) hull.push(x, 0, z, x, -BEACH.depth, z)
+  addFixed(RAPIER.ColliderDesc.convexHull(new Float32Array(hull)), { x: 0, y: 0, z: 0 }, null, { friction: 0.9 })
+  for (let i = 0; i < outline.length; i++) {
+    const [ax, az] = outline[i]
+    const [bx, bz] = outline[(i + 1) % outline.length]
+    const len = Math.hypot(bx - ax, bz - az)
+    const yaw = Math.atan2(-(bz - az), bx - ax)
+    addFixed(
+      RAPIER.ColliderDesc.cuboid(len / 2 + 0.5, BEACH.fenceHeight / 2, 0.4),
+      { x: (ax + bx) / 2, y: BEACH.fenceHeight / 2, z: (az + bz) / 2 },
+      { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+    )
+  }
+  cliffCollider(isletRock(), WATER.level - 1)
+}
+
+// What every world shares: the sea (its colour set per world) and the clouds.
+export function createWorld(scene) {
   // Sea: physical material, two scrolling ripple layers, slightly see-through.
   const ripples = paintWaterNormal()
   const normalA = toTexture(ripples, { repeat: WATER.size / 14 })
@@ -166,48 +222,11 @@ export function createWorld(scene) {
   sea.rotation.x = -Math.PI / 2
   sea.position.y = WATER.level
   sea.receiveShadow = true
-
-  // Far scenery: green islands on the left horizon, a hazy mountain behind them.
-  const scenery = [
-    ...makeHill(-250, -300, 120, 30, 60, '#4dbb3c', 11),
-    ...makeHill(-130, -360, 55, 18, 35, '#45ad37', 12),
-    ...makeHill(-400, -470, 150, 60, 80, '#6f9fd6', 13),
-  ]
-
-  scene.add(slab, shallow, sea, makeClouds(), ...scenery)
-  const isletFrom = scene.children.length
-
-  // The islet: a low green hill with a grass-capped rock and two palms on it.
-  const I = ISLET
-  const islet = new Group()
-  islet.position.set(I.x, 0, I.z)
-  scene.add(islet, ...makeHill(I.x, I.z, I.hill.rx, I.hill.ry, I.hill.rz, '#4dbb3c', 14))
-  const [rx, rz, ...rock] = I.rock // offset from the islet centre; buildCliff wants world x, z (its collider)
-  buildCliff(scene, [I.x + rx, I.z + rz, ...rock], 5, WATER.level - 1)
-  const top = WATER.level - 1 + I.rock[4]
-  buildPalm(islet, -4, -2, 11, -0.3, 0.1, 50, top)
-  buildPalm(islet, 6, 3, 9, 0.2, -0.2, 51, top)
-
-  // Collision: the slab as a convex hull, and a fence along every edge.
-  const hull = []
-  for (const [x, z] of outline) hull.push(x, 0, z, x, -BEACH.depth, z)
-  addFixed(RAPIER.ColliderDesc.convexHull(new Float32Array(hull)), { x: 0, y: 0, z: 0 }, null, { friction: 0.9 })
-  for (let i = 0; i < outline.length; i++) {
-    const [ax, az] = outline[i]
-    const [bx, bz] = outline[(i + 1) % outline.length]
-    const len = Math.hypot(bx - ax, bz - az)
-    const yaw = Math.atan2(-(bz - az), bx - ax)
-    addFixed(
-      RAPIER.ColliderDesc.cuboid(len / 2 + 0.5, BEACH.fenceHeight / 2, 0.4),
-      { x: (ax + bx) / 2, y: BEACH.fenceHeight / 2, z: (az + bz) / 2 },
-      { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
-    )
-  }
+  scene.add(sea, makeClouds())
 
   let scroll = 0 // m the sea has slid toward +Z (a race past RACE.cruiseZ moves the sea, not the boat)
   return {
-    // The land (beach, shallows, hills, islet) a race slides away behind the boat; the sea, clouds and sky stay.
-    home: [slab, shallow, ...scenery, ...scene.children.slice(isletFrom)],
+    setSeaColor: (color) => sea.material.color.set(color),
     setScroll: (m) => (scroll = m),
     update(dt, elapsed) {
       // One ripple tile is 14 m (A) / 37 m (B); v runs toward -Z.

@@ -9,7 +9,8 @@
 // Never throws and never blocks play: with no server (or an unreachable one) the game runs on a
 // fresh, unsaved state and keeps trying to connect.
 import { Client } from '@colyseus/sdk'
-import { DEV_MODE, NET, SERVER_URL } from './config.js'
+import { DEV_MODE, NET, SERVER_URL, WORLDS } from './config.js'
+import { worldState } from './worlds.js'
 import {
   authState,
   canResolveServer,
@@ -123,13 +124,16 @@ export function sendNet(type, payload) {
   return true
 }
 
+// A roster entry is in this player's world (worlds.js; "" from an older client = the start world).
+export const sameWorld = (p) => (p.world || WORLDS.start) === worldState.current
+
 // --- Racers (roster) -----------------------------------------------------------
 // Everyone else in the room who is racing right now: [{ id, name, distance, pfp }] for the HUD's
 // distance bar and podium. Read from the synced roster (backend PlayerState), [] when offline.
 export function remoteRacers() {
   const out = []
   net.room?.state?.players?.forEach?.((p, id) => {
-    if (id !== net.sessionId && p.racing) out.push({ id, name: p.username || 'Player', distance: p.distance || 0, pfp: p.pfp || '' })
+    if (id !== net.sessionId && p.racing && sameWorld(p)) out.push({ id, name: p.username || 'Player', distance: p.distance || 0, pfp: p.pfp || '' })
   })
   return out
 }
@@ -184,7 +188,7 @@ export function sendPose(pose) {
   send('pose', pose)
 }
 let loadoutKey = ''
-// { boat, engine, trail, partner, pets: [{ kind, tier }] }: sent when it changes.
+// { boat, engine, trail, partner, pets: [{ kind, tier }], world }: sent when it changes.
 export function sendLoadout(loadout) {
   presence.loadout = loadout
   const key = JSON.stringify(loadout)

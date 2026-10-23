@@ -77,8 +77,9 @@ function makeStars(count = 1400) {
 }
 
 export function createLighting(scene, renderer, preset) {
-  const D = TIME_OF_DAY.day
-  const N = TIME_OF_DAY.night
+  // The two moods in use: TIME_OF_DAY, or a world's own sky (setMoods).
+  let D = TIME_OF_DAY.day
+  let N = TIME_OF_DAY.night
 
   // --- Sky + stars ---
   const skyMaterial = new ShaderMaterial({
@@ -181,6 +182,14 @@ export function createLighting(scene, renderer, preset) {
     sun,
     addLamp,
     isNight: () => target === 1,
+    // A world's sky { day, night } (WORLDS): swapped at once, keeping day or night as it is.
+    setMoods(sky) {
+      if (sky.day === D && sky.night === N) return
+      D = sky.day
+      N = sky.night
+      apply()
+      bakeEnvironment(night)
+    },
     toggleDayNight() {
       target = target === 1 ? 0 : 1
     },

@@ -51,16 +51,12 @@
   cursor: pointer;
 }
 /* Icon-only buttons: the svg is centred at --icon of the button. */
-.hud-logo,
-.pill-btn,
 .hud-round,
 .hud-slot {
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.hud-logo > svg,
-.pill-btn > svg,
 .hud-round > svg,
 .hud-slot > svg {
   width: var(--icon);
@@ -107,58 +103,13 @@
   background-clip: text;
 }
 
-/* --- Top row (logo, timer, daily, round buttons) ------------------------------------ */
+/* --- Top row (round buttons; the top-left corner is Boxity's toolbar) ------------------------------------ */
 .hud-top {
   position: absolute;
   left: var(--sl);
   right: var(--sr);
   top: var(--st);
   height: 0;
-}
-
-/* --- Top-left: logo + menu/chat pill ------------------------------------------------ */
-.hud-tl {
-  position: absolute;
-  left: calc(20 * var(--u));
-  top: calc(15 * var(--u));
-  display: flex;
-  gap: calc(12 * var(--u));
-}
-.hud-logo,
-.pill-btn {
-  width: max(var(--tap), calc(55 * var(--u)));
-  height: max(var(--tap), calc(55 * var(--u)));
-}
-.hud-logo {
-  --icon: 58%;
-  border-radius: calc(16 * var(--u));
-  background: var(--panel);
-}
-.hud-pill {
-  display: flex;
-  padding: 0 calc(4 * var(--u));
-  border-radius: calc(30 * var(--u));
-  background: var(--panel);
-}
-.pill-btn {
-  --icon: 52%;
-}
-
-/* Unread chat count on the chat button. */
-.chat-badge {
-  position: absolute;
-  top: 4%;
-  right: 2%;
-  min-width: 40%;
-  height: 40%;
-  padding: 0 8%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: #2f7bff;
-  box-shadow: 0 0 0 max(1px, calc(2 * var(--u))) #fff;
-  font-size: max(10px, calc(16 * var(--u)));
 }
 
 /* --- Timer ------------------------------------------------------------------------------- */
@@ -763,8 +714,8 @@
   --rw: max(calc(210 * var(--u)), calc(3 * var(--tap) + 30 * var(--u))); /* right column */
   --cluster: calc(clamp(72px, 20vmin, 100px) + clamp(52px, 14vmin, 70px) + 12px + clamp(12px, 3vmin, 24px));
 }
-/* The HUD's menu button / gear open the portal menu (which also has respawn), so
-   the touch layer's own top-right buttons would only cover the round buttons. */
+/* Boxity's toolbar has the menu (with Reset Character), so the touch layer's own
+   top-right buttons would only cover the round buttons. */
 .touch-ui .touch-top {
   display: none;
 }
@@ -816,10 +767,11 @@
   top: 0;
 }
 
-/* --- Touch, landscape: top row flows left to right, bars stay between the joystick and the buttons. */
+/* --- Touch, landscape: top row (round buttons) on the right, bars stay between the joystick and the buttons. */
 .touch-ui .hud:not(.portrait) .hud-top {
   display: flex;
   align-items: flex-start;
+  justify-content: flex-end; /* the top-left corner is Boxity's toolbar */
   gap: 10px;
   padding: calc(15 * var(--u)) calc(15 * var(--u)) 0 calc(20 * var(--u));
 }
@@ -935,7 +887,7 @@
   top: calc(var(--st) + 8px);
 }
 
-/* Scene mode (hud.setScene, e.g. the Trails scene): only the top-left pill and the round buttons stay. */
+/* Scene mode (hud.setScene, e.g. the Trails scene): only the round buttons stay. */
 .hud.scene .hud-podium,
 .hud.scene .hud-timer,
 .hud.scene .hud-daily,

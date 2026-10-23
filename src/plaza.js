@@ -8,6 +8,7 @@ import {
   DoubleSide,
   Group,
   MeshBasicMaterial,
+  NormalBlending,
   PlaneGeometry,
   RepeatWrapping,
   Shape,
@@ -21,7 +22,7 @@ import { PLAZA } from './config.js'
 import { short } from './interact.js'
 import { createEmitter } from './particles.js'
 import { paintFade, paintFlag, paintLaneWater, paintText, paintWaterfall } from './textures.js'
-import { buildCliff, buildPalm, fontReady, glow, label, neon, put, solidBox, solidPole, std } from './propkit.js'
+import { fontReady, glow, label, neon, put, solidBox, solidPole, std } from './propkit.js'
 
 // The training plaza at the back of the beach (+Z), laid out like the
 // reference's south view from the spawn:
@@ -30,12 +31,13 @@ import { buildCliff, buildPalm, fontReady, glow, label, neon, put, solidBox, sol
 //    requirement tags) leaning toward the middle, a dark and a yellow
 //    leaderboard behind them (Rebirth / Wins, Power / Playtime: the server's top
 //    saved players, see setLeaderboard) and a big "Train" sign
-//  - the VIP "City" portal on a dais in the middle,
+//  - the VIP portal on a dais in the middle (to the City and back: worlds.js),
 //    under a glowing waterfall with light rays, mist and spray
 //  - left (+X): the Golden Machine and the Index kiosk; right (-X): Forest
 //    Relics and a treasure chest (the green boat further right is in the
 //    west Boats stall, shops.js)
-//  - red feather flags, and grass-capped rock cliffs with palms ringing it all
+//  - red feather flags (the cliffs and palms ringing it all are scenery, built
+//    per world: environment.js)
 //  - particles (particles.js): waterfall mist + falling spray, sparkles around
 //    the falls and portal, bubbles off every lane, golden motes at the VIP gate
 // Glowing parts are HDR-bright (neon rails, waterfall, VIP gate) so the bloom
@@ -127,18 +129,36 @@ function buildVip(root, animated) {
   fill.lineTo(r, legH)
   fill.absarc(0, legH, r, 0, Math.PI, false)
   fill.closePath()
-  const portalMat = glow('#4fc8ff', 0.45)
+  const portalMat = glow(P.portal.open, 0.45)
   put(g, new ShapeGeometry(fill, 16), portalMat, 0, H, 0, false)
 
-  // The "City" board over the arch: destination and what it takes to enter.
-  const boardFace = std('#ffffff', { map: textFace('City\n● Rebirth: 10\n⚡ Power: 200', '#ffffff', '#14306e', ['#ffffff', '#ff6b6b', '#7fd8ff']), emissive: '#ffffff', emissiveIntensity: 0.25 })
-  boardFace.emissiveMap = boardFace.map
+  // The board over the arch: destination and what it takes to enter (setSign).
+  const boardFace = std('#ffffff', { emissive: '#ffffff', emissiveIntensity: 0.25 })
   const frame = std('#2a7bff', { emissive: '#1f6bff', emissiveIntensity: 0.9 })
   put(g, new BoxGeometry(4.2, 2.7, 0.25), [frame, frame, frame, frame, frame, boardFace], 0, H + legH + r + 1.9, 0)
   put(g, new BoxGeometry(4.6, 3.1, 0.15), neon('#7fd8ff'), 0, H + legH + r + 1.9, 0.1)
+  let veil = 0.4 // the fill's mean opacity: see-through when open, a solid veil when locked
   animated.push((t) => {
-    portalMat.opacity = 0.4 + Math.sin(t * 2.2) * 0.08
+    portalMat.opacity = veil + Math.sin(t * 2.2) * 0.08
   })
+  let sign = null
+  // lines: [[text, colour]], the destination first; open: the glowing fill's colour (open or locked).
+  function setSign(lines, open, force = false) {
+    const next = JSON.stringify([lines, open])
+    if (next === sign && !force) return
+    sign = next
+    boardFace.map?.dispose()
+    boardFace.map = boardFace.emissiveMap = textFace(lines.map(([t]) => t).join('\n'), '#ffffff', '#14306e', lines.map(([, c]) => c))
+    boardFace.needsUpdate = true
+    portalMat.color.set(open ? P.portal.open : P.portal.locked)
+    // Locked: a solid red veil (additive red would wash out against the white waterfall behind).
+    portalMat.blending = open ? AdditiveBlending : NormalBlending
+    veil = open ? 0.4 : 0.75
+    portalMat.needsUpdate = true
+  }
+  setSign([['City', '#ffffff']], true)
+  fontReady.then(() => setSign(...JSON.parse(sign), true)) // repaint in Fredoka
+  return setSign
 }
 
 // --- Train stations ----------------------------------------------------------------------
@@ -503,9 +523,8 @@ export function createPlaza(scene) {
   scene.add(root)
   const animated = [] // fn(elapsed, dt) per animated prop
 
-  P.cliffs.forEach((c, i) => buildCliff(root, c, 20 + i * 7))
   buildWaterfall(root, animated)
-  buildVip(root, animated)
+  const setSign = buildVip(root, animated)
   const trains = P.trains.map((spec) => buildTrain(root, animated, spec))
   const lanes = trains.flatMap((t) => t.lanes)
   const boards = trains.flatMap((t) => t.boards)
@@ -521,7 +540,6 @@ export function createPlaza(scene) {
   buildRelics(root, animated)
   buildChest(root)
   buildFlags(root)
-  P.palms.forEach(([x, z, y, h, lx, lz], i) => buildPalm(root, x, z, h, lx, lz, 300 + i, y))
   root.updateMatrixWorld(true)
   buildParticles(scene, lanes)
 
@@ -535,6 +553,9 @@ export function createPlaza(scene) {
         l.open.visible = on
       }
     },
+    // The VIP portal's board (worlds.js): lines [[text, colour]] with the destination first, and
+    // whether the portal is open (its fill glows PLAZA.portal.open, else .locked).
+    setPortal: (lines, open) => setSign(lines, open),
     // The server's `leaderboard` message: { boards: { stat: [{ name, value }] }, ranks: { stat: n | null } }.
     setLeaderboard(data) {
       leaders = data

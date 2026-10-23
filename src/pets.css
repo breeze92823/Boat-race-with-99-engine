@@ -367,7 +367,7 @@
     --pt-disc: max(60px, calc(100 * var(--uiw-u)));
   }
   .pets-window .uiw-body {
-    height: max(calc((var(--uiw-h) - 10) * var(--uiw-u)), min(460px, calc(100dvh - 110px)));
+    height: max(calc((var(--uiw-h) - 10) * var(--uiw-u)), min(460px, calc(100dvh - 110px - var(--uiw-top, 0px))));
     padding-top: max(26px, calc(48 * var(--uiw-u)));
     padding-bottom: 34px;
   }

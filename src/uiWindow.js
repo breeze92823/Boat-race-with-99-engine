@@ -35,6 +35,36 @@ export function closeTopWindow() {
 
 export const anyWindowOpen = () => !!current
 
+// Boxity's toolbar (setWindowReserved: the reserved areas from bloxity.onReservedAreas) sits
+// over the top-left corner, over the whole top edge on narrow phones. An open window whose
+// frame, title or X would reach under it is fitted into the screen below it instead
+// (--uiw-top on its overlay, uiWindow.css). The chat feed under the toolbar is left out:
+// clearing it too would leave a landscape phone almost no height for the window.
+const TOOLBAR_GAP = 8 // px kept clear under the toolbar
+let toolbar = null
+export function setWindowReserved(areas) {
+  toolbar = areas.find((a) => a.id === 'toolbar') ?? null
+  if (current) fitClear(current)
+}
+window.addEventListener('resize', () => current && fitClear(current))
+
+function fitClear({ overlay, dialog }) {
+  overlay.style.removeProperty('--uiw-top')
+  if (!toolbar || !toolbar.width || !toolbar.height) return
+  // The frame plus what hangs off it, from offsets (the pop / close animations scale it).
+  const x = dialog.offsetLeft
+  const y = dialog.offsetTop
+  const box = { left: x, top: y, right: x + dialog.offsetWidth, bottom: y + dialog.offsetHeight }
+  for (const e of dialog.querySelectorAll(':scope > .uiw-title, :scope > .uiw-close')) {
+    box.left = Math.min(box.left, x + e.offsetLeft)
+    box.top = Math.min(box.top, y + e.offsetTop)
+    box.right = Math.max(box.right, x + e.offsetLeft + e.offsetWidth)
+  }
+  const bottom = toolbar.top + toolbar.height
+  const under = box.left < toolbar.left + toolbar.width && toolbar.left < box.right && box.top < bottom + TOOLBAR_GAP
+  if (under) overlay.style.setProperty('--uiw-top', `${bottom + TOOLBAR_GAP}px`)
+}
+
 // A chunky game button. color: 'green' | 'red'. html may contain <br>.
 export function uiButton(html, color, onClick, className = '') {
   const b = document.createElement('button')
@@ -97,6 +127,7 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
       overlay.classList.remove('closing')
       onOpen?.()
       overlay.hidden = false
+      fitClear(win)
       replay(dialog, 'pop')
       cardsIn(body)
       document.exitPointerLock?.() // the cursor has to be free to press the buttons

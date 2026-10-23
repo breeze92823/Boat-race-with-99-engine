@@ -10,7 +10,7 @@
 // up close; a remote boat is `lite` (boat.js) and its hull baked, without shadows (draw calls).
 import { Group } from 'three'
 import { BOATS, COARSE_POINTER, NET } from './config.js'
-import { roster, net } from './net.js'
+import { roster, net, sameWorld } from './net.js'
 import { createBoat } from './boat.js'
 import { buildBoat } from './boatModels.js'
 import { ENGINES } from './engine.js'
@@ -248,7 +248,7 @@ export function createRemotePlayers(scene) {
       const mine = net.sessionId
       list.length = 0
       players.forEach((p, id) => {
-        if (id === mine) return
+        if (id === mine || !sameWorld(p)) return // a player in the other world isn't here
         list.push({ id, p, d: Math.hypot(p.x - viewer.x, p.z + scroll - viewer.z) })
       })
       list.sort((a, b) => a.d - b.d)

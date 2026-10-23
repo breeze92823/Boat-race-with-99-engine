@@ -5,7 +5,7 @@ import { initNet, net, onNetMessage, sendLoadout, sendPose, syncAvatar } from '.
 import { inputState, install as installInput, onKey } from './input.js'
 import { installTouch } from './touch.js'
 import { createHud } from './hud.js'
-import { anyWindowOpen, closeTopWindow } from './uiWindow.js'
+import { anyWindowOpen, closeTopWindow, setWindowReserved } from './uiWindow.js'
 import { installAudio, setVolume, sfx, toggleMuted, updateAudio } from './audio/index.js'
 import { createRebirth } from './rebirth.js'
 import { createPets, petsState } from './pets.js'
@@ -23,6 +23,8 @@ import { getMode, onModeChanged, toggleMode } from './modes.js'
 import { bodyCount, initPhysics, stepPhysics } from './physics.js'
 import { createLighting } from './lighting.js'
 import { createWorld } from './world.js'
+import { createEnvironment } from './environment.js'
+import { createWorlds, worldState } from './worlds.js'
 import { createPostFx } from './postfx.js'
 import { setParticleDensity, updateParticles } from './particles.js'
 import { setNeonBloom } from './propkit.js'
@@ -105,13 +107,15 @@ bloxity.loadingStep('Starting physics')
 await initPhysics()
 
 lighting = createLighting(scene, renderer, preset)
-const world = createWorld(scene)
+const world = createWorld(scene) // the sea and clouds, shared by every world
 const homeFrom = scene.children.length
+// The scenery of each world (beach / City): one Group each, built when first shown (worlds.js).
+const env = createEnvironment(scene)
 const lobby = createLobby(scene)
 const plaza = createPlaza(scene)
 const shops = createShops(scene)
 // Everything on the start island; a race slides it away behind the boat (race.js / raceScenery.js).
-const home = [...world.home, ...scene.children.slice(homeFrom)]
+const home = scene.children.slice(homeFrom)
 createPlayerBody()
 syncYawToPlayer()
 
@@ -190,15 +194,14 @@ onKey('KeyM', toggleMuted) // sound on/off (touch: the portal's sound_volume set
 // Respawning mid-race leaves the race instead (race.leave puts the player back at the spawn).
 const respawnOrLeave = () => (race?.isRacing() ? race.leave() : respawn())
 onKey('KeyR', respawnOrLeave)
-installTouch({ menu: bloxity.showMenu, mode: toggleMode, day: toggleDay, respawn: respawnOrLeave })
+installTouch({ mode: toggleMode, day: toggleDay, respawn: respawnOrLeave })
 // Lightning is one counter: the rebirth energy, shown on the HUD's bolt pill and read as race speed.
 let hud = null // made below; the rebirth window reports its energy from the start
 const rebirthWindow = createRebirth({ onChange: (st) => hud?.setStat('wins', Math.floor(st.energy)) })
 onKey('KeyB', rebirthWindow.toggle)
 const petsWindow = createPets()
-onKey('KeyP', petsWindow.toggle)
+onKey('KeyI', petsWindow.toggle) // never P: on CrazyGames P opens Boxity's pause menu
 hud = createHud({
-  menu: bloxity.showMenu,
   claim: () => giftsWindow.open(),
   spin: () => spinWindow.open(),
   daily: () => dailyWindow.open(),
@@ -214,6 +217,12 @@ hud = createHud({
   },
   autoTrain: (on) => training.setAuto(on),
   boosts: () => boostPanel.open(),
+})
+// Boxity's toolbar + chat feed own the top-left corner: the HUD keeps clear of them, and the
+// popup windows of the toolbar.
+bloxity.onReservedAreas((areas) => {
+  hud.setReserved(areas)
+  setWindowReserved(areas)
 })
 // Where every boost comes from (the HUD's boost circles).
 const boostPanel = createBoostPanel()
@@ -299,6 +308,7 @@ const race = createRace({
   world,
   home,
   onEnd() {
+    boat.rider.visible = true
     playerGroup.visible = getMode() !== 'player'
     // AUTO RACE goes again once the result has been up for a moment.
     setTimeout(() => autoRace && !trailsScene.isOpen() && race.start(), RACE.resultSeconds * 1000)
@@ -307,6 +317,22 @@ const race = createRace({
 
 // Training: the plaza's treadmill lanes (and AUTO TRAIN) pay lightning.
 const training = createTraining({ hud, plaza, onGain: (n) => rebirthWindow.addEnergy(n) })
+
+// Worlds: the plaza's VIP portal goes to the City (10 rebirths + 200 Power) and back. Same island,
+// shops and progress; the scenery, sea and sky change. A race or the Trails scene ends first.
+const worlds = createWorlds({
+  hud,
+  plaza,
+  env,
+  world,
+  lighting,
+  stats: () => ({ rebirths: rebirthState.rebirths, power: rebirthState.energy }),
+  leave() {
+    if (race.isRacing()) race.leave()
+    trailsScene.close()
+  },
+  respawn,
+})
 
 // Hub pads in front of the Eggs stall, Boats stall, Engine Upgrade machine and hero statues open their windows.
 const hubWindows = { pets: petsWindow.open, boats: boatsWindow.open, engine: engineWindow.open, partner: partnerWindow.open }
@@ -336,6 +362,7 @@ function syncGear() {
     trail: trailState.equipped ?? '',
     partner: partnerState.equipped ?? '',
     pets: petsState.pets.filter((pt) => pt.equipped).map((pt) => ({ kind: pt.kind, tier: pt.tier })),
+    world: worldState.current, // the others only draw players in their own world
   }
   const key = JSON.stringify(gear)
   if (key === gearKey) return
@@ -357,7 +384,7 @@ const round = (n) => Math.round(n * 100) / 100
 
 // Progress lives only on the server (net.js): it loads each window's part of the save into it
 // and saves the HUD's trophies + gems and every window's snapshot. Nothing is kept in the browser.
-initNet({ hud, stores: [rebirthWindow, petsWindow, engineWindow, boatsWindow, partnerWindow, giftsWindow, trailsScene, race, eggs] })
+initNet({ hud, stores: [rebirthWindow, petsWindow, engineWindow, boatsWindow, partnerWindow, giftsWindow, trailsScene, race, eggs, worlds] })
 
 // The plaza's leaderboards: the server's top lists + this player's ranks (on join, then every
 // minute), and this player's own live values on each board's bottom line.
@@ -392,7 +419,8 @@ renderer.setAnimationLoop(() => {
     boat.update(dt, TRAILS.showcase.speed, 0, elapsed)
     animator?.update(dt, { grounded: true, speed: 0, verticalVelocity: 0, turn: 0 })
   } else if (racing) {
-    playerGroup.visible = true // the race cam is always third person
+    playerGroup.visible = true // the boat stays in view; in first person only the rider is hidden
+    boat.rider.visible = getMode() !== 'player'
     boat.update(dt, race.boatSpeed(), inputState.move.x, elapsed, race.tapBoost())
     animator?.update(dt, { grounded: true, speed: 0, verticalVelocity: 0, turn: 0 })
   } else if (getMode() === 'character') {
@@ -424,6 +452,7 @@ renderer.setAnimationLoop(() => {
   })
   if (!staging) training.update(dt, player.renderPosition, camera, racing)
   hub.update(elapsed, staging || racing ? null : player.position)
+  worlds.update(dt, staging || racing ? null : player.position)
   interact.update(camera, staging || racing ? null : player.renderPosition)
   eggs.update(staging || racing ? null : player.renderPosition)
   trail.update(dt, camera, staging ? TRAILS.showcase.speed : scroll)
@@ -461,5 +490,5 @@ if (import.meta.env.DEV) {
     resetPlayer({ x, y, z }, facing)
     syncYawToPlayer()
   }
-  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, toggleDay, teleport, rebirth: rebirthWindow, trails: trailsScene, gifts: giftsWindow, daily: dailyWindow, spin: spinWindow, hud, race, training, eggs, pets: petsWindow, net, remotes, companions, plaza }
+  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, toggleDay, teleport, rebirth: rebirthWindow, trails: trailsScene, gifts: giftsWindow, daily: dailyWindow, spin: spinWindow, hud, race, training, eggs, pets: petsWindow, net, remotes, companions, plaza, worlds, env }
 }
