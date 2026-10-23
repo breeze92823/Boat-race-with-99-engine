@@ -843,10 +843,38 @@
   margin-right: auto;
 }
 .touch-ui .hud:not(.portrait) .hud-podium {
-  top: calc(var(--st) + 15 * var(--u) + max(var(--tap), calc(65 * var(--u))) + 6px);
+  top: calc(var(--st) + 8px);
 }
 .touch-ui .hud:not(.portrait) .hud-bottom {
   --side: var(--cluster);
+}
+
+/* Podium on touch: small medals without ribbons, up in the free middle of the top row
+   (in landscape it hung right over the boat). */
+.touch-ui .hud .hud-podium {
+  --m: 32px;
+  gap: 8px;
+  margin-left: -52px; /* (3 x 32 + 2 x 8) / 2 */
+}
+.touch-ui .medal {
+  border-width: 2px;
+}
+.touch-ui .medal-ribbon {
+  display: none;
+}
+.touch-ui .medal-label {
+  bottom: -8px;
+  font-size: 12px;
+  --o: 1px;
+}
+/* The menu tiles go 3 x 2 so the left column ends well above the joystick. */
+.touch-ui .hud:not(.portrait) .hud-grid {
+  grid-template-columns: repeat(3, var(--tile));
+  gap: 6px;
+  margin: 6px 0 0;
+}
+.touch-ui .hud.short .hud-left {
+  top: calc(var(--st) + 15 * var(--u) + var(--tap) + 8px);
 }
 
 /* Phone landscape: the right column splits in two so it ends above the buttons. */
@@ -892,6 +920,19 @@
 }
 .touch-ui .hud.portrait .hud-bottom {
   --lift: calc(var(--cluster) + 8px - 10 * var(--u));
+}
+
+/* A window open on touch (body.uiw-open, uiWindow.js): the HUD and touch buttons only
+   cluttered its edges and ran under its title (the backdrop takes every tap anyway).
+   The trophy / lightning counters stay so prices can be checked against them. */
+.touch-ui.uiw-open .hud > :not(.hud-right),
+.touch-ui.uiw-open .right-b,
+.touch-ui.uiw-open .touch-cluster,
+.touch-ui.uiw-open .joy-base {
+  visibility: hidden;
+}
+.touch-ui.uiw-open .hud-right {
+  top: calc(var(--st) + 8px);
 }
 
 /* Scene mode (hud.setScene, e.g. the Trails scene): only the top-left pill and the round buttons stay. */

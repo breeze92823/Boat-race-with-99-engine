@@ -92,6 +92,7 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
       sfx.windowOpen()
       current = win
       shown = true
+      document.body.classList.add('uiw-open') // hud.css folds the HUD away on touch
       clearTimeout(closing)
       overlay.classList.remove('closing')
       onOpen?.()
@@ -110,6 +111,7 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
         overlay.classList.remove('closing')
       }, 160)
       if (current === win) current = null
+      if (!current) document.body.classList.remove('uiw-open')
       onClose?.()
     },
     toggle: () => (win.isOpen() ? win.close() : win.open()),
