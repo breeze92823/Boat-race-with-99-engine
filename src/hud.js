@@ -140,15 +140,18 @@ export function createHud(actions = {}) {
   }
 
   const autos = el('div', 'hud-autos')
-  // fn(on) is told the new state.
+  // fn(on) is told the new state. "AUTO " is its own span so touch screens can drop it
+  // and show compact TRAIN / RACE tiles (hud.css).
   const auto = (label, icon, fn) => {
     const b = button('hud-auto', `<span class="auto-icon">${ICONS[icon]}</span>`, (btn) => {
       fn?.(btn.classList.toggle('on'))
     })
-    b.append(text('auto-label', label))
+    const t = text('auto-label', label)
+    t.prepend(el('span', 'auto-pre', 'AUTO '))
+    b.append(t)
     return b
   }
-  autos.append(auto('AUTO TRAIN', 'bolt', actions.autoTrain), auto('AUTO RACE', 'trophy', actions.autoRace))
+  autos.append(auto('TRAIN', 'bolt', actions.autoTrain), auto('RACE', 'trophy', actions.autoRace))
 
   const boosts = el('div', 'hud-boosts')
   for (const [cls, icon, label] of [

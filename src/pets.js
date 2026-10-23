@@ -186,7 +186,7 @@ export function snapshot() {
 }
 
 // A loaded save over a fresh start (unknown kinds / tiers dropped). A save without pets is a new
-// player: they get the starter pets.
+// player: they get the starter pets (none by default: pets are bought from eggs).
 function applySave(s) {
   petsState.slots = PETS.equipSlots
   petsState.storage = PETS.storage

@@ -18,16 +18,18 @@ import {
   Vector3,
 } from 'three'
 import { PLAZA } from './config.js'
+import { short } from './interact.js'
 import { createEmitter } from './particles.js'
 import { paintFade, paintFlag, paintLaneWater, paintText, paintWaterfall } from './textures.js'
-import { buildCliff, buildPalm, glow, label, neon, put, solidBox, solidPole, std } from './propkit.js'
+import { buildCliff, buildPalm, fontReady, glow, label, neon, put, solidBox, solidPole, std } from './propkit.js'
 
 // The training plaza at the back of the beach (+Z), laid out like the
 // reference's south view from the spawn:
 //  - two Train stations: a slate platform with yellow trim, six treadmill
 //    lanes (glowing scrolling water, neon rails, SPEED boards with lock /
-//    requirement tags) leaning toward the middle, a dark and a yellow board
-//    behind them and a big "Train" sign
+//    requirement tags) leaning toward the middle, a dark and a yellow
+//    leaderboard behind them (Rebirth / Wins, Power / Playtime: the server's top
+//    saved players, see setLeaderboard) and a big "Train" sign
 //  - the VIP "City" portal on a dais in the middle,
 //    under a glowing waterfall with light rays, mist and spray
 //  - left (+X): the Golden Machine and the Index kiosk; right (-X): Forest
@@ -225,25 +227,119 @@ function buildTrain(root, animated, spec) {
     })
   })
 
-  // The two boards behind the lanes (dark on screen-left = +X), and the Train sign.
-  const boards = [
-    ['#252a36', '#323a4c', 2.7, spec.tags[0], '#ff5fd8'],
-    ['#ffd21a', '#ffe680', -2.7, spec.tags[1], '#ffe14a'],
+  // The two leaderboards behind the lanes (dark on screen-left = +X), and the Train sign.
+  const styles = [
+    { outer: '#252a36', x: 2.7, bg: '#0d1733', head: '#5fd0ff', row: '#1d4fd6', rowEdge: '#4f8bff', foot: '#9fc0ff', footStroke: '#000814' },
+    { outer: '#ffd21a', x: -2.7, bg: '#ffd21a', head: '#d0306a', row: '#2a62ef', rowEdge: '#7fb0ff', foot: '#5a3a00', footStroke: '#fff2a8' },
   ]
   const boardZ = PD / 2 - 0.8
-  for (const [outer, inner, bx, tag, tagColor] of boards) {
-    put(g, new BoxGeometry(4.8, 7, 0.5), std(outer, { roughness: 0.6 }), bx, PH + 3.9, boardZ)
-    put(g, new BoxGeometry(4.1, 6.2, 0.1), std(inner, { emissive: inner, emissiveIntensity: 0.15 }), bx, PH + 3.9, boardZ - 0.3)
-    const t = label(tag, 0.7, { color: tagColor, outline: '#1a0a14', font: '700 64px Fredoka, sans-serif', outlineWidth: 10 })
-    t.position.set(bx, PH + 8.1, boardZ)
+  const boards = spec.boards.map((stat, i) => {
+    const st = styles[i]
+    const def = P.leaderboards[stat]
+    put(g, new BoxGeometry(4.8, 7, 0.5), std(st.outer, { roughness: 0.6 }), st.x, PH + 3.9, boardZ)
+    const canvas = document.createElement('canvas')
+    canvas.width = 512
+    canvas.height = 776
+    const tex = canvasTexture(canvas)
+    const edge = std(st.bg)
+    const faceMat = std('#ffffff', { map: tex, emissiveMap: tex, emissive: '#ffffff', emissiveIntensity: 0.55, roughness: 0.7 })
+    put(g, new BoxGeometry(4.1, 6.2, 0.1), [edge, edge, edge, edge, edge, faceMat], st.x, PH + 3.9, boardZ - 0.3)
+    const t = label(def.title, 1.4, { color: def.color, outline: '#1a0a14', font: '700 64px Fredoka, "Segoe UI Emoji", sans-serif', outlineWidth: 10 })
+    t.position.set(st.x, PH + 8.3, boardZ)
     g.add(t)
-  }
+    const board = { stat, def, st, canvas, tex, key: '' }
+    drawBoard(board, null, null, null)
+    return board
+  })
   const [bx, bz] = world(0, boardZ)
   solidBox(5.2, 3.5, 0.3, bx, PH + 3.9, bz, spec.yaw)
   const sign = label('Train', 2.4, { color: '#ffe14a', outline: '#3a2400', outlineWidth: 18 })
-  sign.position.set(0, PH + 9.6, boardZ)
+  sign.position.set(0, PH + 10.6, boardZ)
   g.add(sign)
-  return lanes
+  return { lanes, boards }
+}
+
+// --- Leaderboards --------------------------------------------------------------------------
+// Each board's face is a canvas: RANK / NAME / stat header, PLAZA_ROWS rows (gold, silver, bronze
+// ranks first) and the player's own line at the bottom. "Loading..." until the server answers.
+const PLAZA_ROWS = 10
+// Seconds -> "45m", "12h 5m", "3d 4h".
+function duration(s) {
+  const m = Math.floor(s / 60)
+  const h = Math.floor(m / 60)
+  const d = Math.floor(h / 24)
+  if (d) return `${d}d ${h % 24}h`
+  if (h) return `${h}h ${m % 60}m`
+  return `${m}m`
+}
+const formatStat = (stat, v) => (stat === 'playtime' ? duration(v) : short(v))
+const RANK_COLORS = ['#ffd84a', '#e4ecf5', '#ff9a4a']
+
+// Fits text into maxW by shrinking the font (names can be long).
+function fitText(ctx, text, x, y, maxW, size, align) {
+  let px = size
+  ctx.font = `700 ${px}px Fredoka, "Segoe UI Emoji", sans-serif`
+  while (px > 12 && ctx.measureText(text).width > maxW) ctx.font = `700 ${--px}px Fredoka, "Segoe UI Emoji", sans-serif`
+  ctx.textAlign = align
+  ctx.strokeText(text, x, y)
+  ctx.fillText(text, x, y)
+}
+
+// rows: [{ name, value }] or null (not loaded); rank: this player's place or null; mine: their value.
+function drawBoard(board, rows, rank, mine) {
+  const key = JSON.stringify([rows, rank, mine])
+  if (key === board.key) return
+  board.key = key
+  const { canvas, st, def, stat } = board
+  const ctx = canvas.getContext('2d')
+  const W = canvas.width
+  const H = canvas.height
+  ctx.fillStyle = st.bg
+  ctx.fillRect(0, 0, W, H)
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = 6
+  ctx.strokeStyle = '#0a1030'
+  const colX = [64, 230, 448]
+  // Header.
+  ctx.fillStyle = st.head
+  fitText(ctx, 'RANK', colX[0], 40, 110, 30, 'center')
+  fitText(ctx, 'NAME', colX[1], 40, 200, 30, 'center')
+  fitText(ctx, def.column, colX[2], 40, 120, 30, 'center')
+  // Rows.
+  const top = 74
+  const rowH = 60
+  for (let i = 0; i < PLAZA_ROWS; i++) {
+    const y = top + i * rowH
+    ctx.fillStyle = st.row
+    ctx.beginPath()
+    ctx.roundRect(14, y + 4, W - 28, rowH - 10, 12)
+    ctx.fill()
+    ctx.lineWidth = 3
+    ctx.strokeStyle = st.rowEdge
+    ctx.stroke()
+    ctx.lineWidth = 6
+    ctx.strokeStyle = '#0a1030'
+    const r = rows?.[i]
+    const cy = y + rowH / 2 - 1
+    ctx.fillStyle = RANK_COLORS[i] ?? '#ffffff'
+    fitText(ctx, `#${i + 1}`, colX[0], cy, 90, 28, 'center')
+    ctx.fillStyle = '#ffffff'
+    fitText(ctx, r ? r.name : rows ? '-' : '', colX[1], cy, 210, 26, 'center')
+    fitText(ctx, r ? formatStat(stat, r.value) : '', colX[2], cy, 116, 26, 'center')
+  }
+  // The player's own line.
+  const fy = top + PLAZA_ROWS * rowH + 34
+  ctx.fillStyle = st.foot
+  ctx.strokeStyle = st.footStroke
+  ctx.lineWidth = 4
+  if (!rows) {
+    fitText(ctx, 'Loading...', W / 2, fy, W - 40, 32, 'center')
+  } else {
+    fitText(ctx, rank ? `Your Rank: #${rank}` : 'Your Rank: -', 30, fy, 250, 28, 'left')
+    if (mine != null) fitText(ctx, formatStat(stat, mine), W - 30, fy, 200, 30, 'right')
+  }
+  board.tex.needsUpdate = true
 }
 
 // --- Kiosks and displays ------------------------------------------------------------------
@@ -410,7 +506,16 @@ export function createPlaza(scene) {
   P.cliffs.forEach((c, i) => buildCliff(root, c, 20 + i * 7))
   buildWaterfall(root, animated)
   buildVip(root, animated)
-  const lanes = P.trains.flatMap((spec) => buildTrain(root, animated, spec))
+  const trains = P.trains.map((spec) => buildTrain(root, animated, spec))
+  const lanes = trains.flatMap((t) => t.lanes)
+  const boards = trains.flatMap((t) => t.boards)
+  let leaders = null // the server's last `leaderboard` { boards, ranks }
+  let mine = {} // this player's live values per stat
+  const redraw = () => boards.forEach((b) => drawBoard(b, leaders?.boards?.[b.stat] ?? null, leaders?.ranks?.[b.stat] ?? null, mine[b.stat] ?? null))
+  fontReady.then(() => {
+    for (const b of boards) b.key = '' // repaint in Fredoka
+    redraw()
+  })
   buildGolden(root, animated)
   buildIndex(root)
   buildRelics(root, animated)
@@ -429,6 +534,16 @@ export function createPlaza(scene) {
         l.tag.visible = !on
         l.open.visible = on
       }
+    },
+    // The server's `leaderboard` message: { boards: { stat: [{ name, value }] }, ranks: { stat: n | null } }.
+    setLeaderboard(data) {
+      leaders = data
+      redraw()
+    },
+    // This player's own values ({ rebirths, trophies, energy, playtime }) for the boards' bottom line.
+    setMine(values) {
+      mine = values
+      redraw()
     },
     update(dt, elapsed) {
       for (const fn of animated) fn(elapsed, dt)

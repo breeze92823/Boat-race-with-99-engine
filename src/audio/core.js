@@ -27,9 +27,10 @@ export const A = {
 }
 
 const startHooks = []
+let ducked = false // menu window open: see setDucked
 // fn(ctx) runs once the context exists (immediately if it already does).
 export function onStart(fn) {
-  if (A.ctx) fn(A.ctx)
+  if (A.master) fn(A.ctx)
   else startHooks.push(fn)
 }
 
@@ -121,16 +122,29 @@ function makeImpulse(ctx) {
   return buf
 }
 
+// The context itself is made inside the gesture (autoplay rules); the noise buffers,
+// the reverb IR and the bus graph (~2M generated samples: a hitch on a phone) follow
+// a moment later, so the first tap doesn't stall the frame it lands in.
 function build() {
   const AC = window.AudioContext || window.webkitAudioContext
   if (!AC) return false
   let ctx
   try {
-    ctx = new AC({ latencyHint: 'interactive' })
+    ctx = new AC({ latencyHint: COARSE_POINTER ? AUDIO.latencyTouch : AUDIO.latency })
   } catch {
-    return false
+    try {
+      ctx = new AC() // an old engine that rejects a numeric hint
+    } catch {
+      return false
+    }
   }
   A.ctx = ctx
+  setTimeout(buildGraph, 0)
+  return true
+}
+
+function buildGraph() {
+  const ctx = A.ctx
   A.noise.white = makeNoise(ctx, 2, 'white')
   A.noise.pink = makeNoise(ctx, 4, 'pink')
   A.noise.brown = makeNoise(ctx, 4, 'brown')
@@ -149,11 +163,11 @@ function build() {
   limit.ratio.value = 20
   limit.attack.value = 0.002
   limit.release.value = 0.1
-  A.master = ctx.createGain()
-  A.master.gain.value = 0
-  A.master.connect(glue).connect(limit).connect(ctx.destination)
+  const master = ctx.createGain()
+  master.gain.value = 0
+  master.connect(glue).connect(limit).connect(ctx.destination)
 
-  const bus = (gain, to = A.master) => {
+  const bus = (gain, to = master) => {
     const g = ctx.createGain()
     g.gain.value = gain
     g.connect(to)
@@ -161,14 +175,15 @@ function build() {
   }
   A.ui = bus(AUDIO.buses.ui)
   A.sfx = bus(AUDIO.buses.sfx)
-  A.world = bus(1)
+  A.world = bus(ducked ? AUDIO.duck : 1)
   A.amb = bus(AUDIO.buses.amb, A.world)
   A.engine = bus(AUDIO.buses.engine, A.world)
   const conv = ctx.createConvolver()
   conv.buffer = makeImpulse(ctx)
   A.verb = ctx.createGain()
   A.verb.gain.value = AUDIO.reverb.send
-  A.verb.connect(conv).connect(A.master)
+  A.verb.connect(conv).connect(master)
+  A.master = master // last: ready() (and every sound) waits for the whole graph
 
   applyLevel(0.3) // fade in, no thump at start
   for (const fn of startHooks.splice(0)) {
@@ -178,7 +193,6 @@ function build() {
       console.warn('[audio]', e) // one broken layer must not take the rest down
     }
   }
-  return true
 }
 
 // iOS only opens the output for a sound started inside the gesture itself.
@@ -205,15 +219,16 @@ export function installAudio() {
   })
 }
 
-export const ready = () => !!A.ctx && A.ctx.state === 'running'
-export const now = () => A.ctx.currentTime
+export const ready = () => !!A.master && A.ctx.state === 'running'
+// Start time for a one-shot: a hair ahead of the clock, so the nodes reach the audio
+// thread before their envelope begins even if the main thread stalls right after.
+export const now = () => A.ctx.currentTime + AUDIO.lead
 
 // Menu window open: the world (ambience + engine) steps back.
-let ducked = false
 export function setDucked(on) {
-  if (on === ducked || !A.ctx) return
+  if (on === ducked) return
   ducked = on
-  A.world.gain.setTargetAtTime(on ? AUDIO.duck : 1, A.ctx.currentTime, 0.12)
+  if (A.world) A.world.gain.setTargetAtTime(on ? AUDIO.duck : 1, A.ctx.currentTime, 0.12)
 }
 
 // One-shot voice budget: a burst of rewards on a weak phone skips the extras

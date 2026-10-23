@@ -87,6 +87,9 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
     open() {
       if (shown) return
       if (current && current !== win) current.close()
+      // Sound first: the render + layout below can take a while on a phone, and the
+      // whoosh should land with the press, not after it.
+      sfx.windowOpen()
       current = win
       shown = true
       clearTimeout(closing)
@@ -95,11 +98,11 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
       overlay.hidden = false
       replay(dialog, 'pop')
       cardsIn(body)
-      sfx.windowOpen()
       document.exitPointerLock?.() // the cursor has to be free to press the buttons
     },
     close() {
       if (!shown) return
+      sfx.windowClose()
       shown = false
       overlay.classList.add('closing') // juice.css: shrink + fade, then hidden
       closing = setTimeout(() => {
@@ -108,7 +111,6 @@ export function createWindow({ title, icon = '', className = '', onOpen, onClose
       }, 160)
       if (current === win) current = null
       onClose?.()
-      sfx.windowClose()
     },
     toggle: () => (win.isOpen() ? win.close() : win.open()),
   }
