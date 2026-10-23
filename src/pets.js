@@ -50,7 +50,7 @@ const ICONS = {
 // --- Pet portraits ------------------------------------------------------------------
 // Blocky "simulator" pets: one rounded cube body, big googly eyes and a per-kind
 // set of ears / markings. Colours here, stats in config (PETS.kinds).
-const LOOKS = {
+export const LOOKS = {
   dog: { body: '#8b4a2b', dark: '#5a2c18', ears: 'floppy', nose: true },
   cat: { body: '#f2a541', dark: '#c46f1c', ears: 'pointy', inner: '#ffb0c4', whiskers: true },
   bunny: { body: '#f3ecf2', dark: '#d8c6d4', ears: 'long', inner: '#ffb0c4', nose: true },

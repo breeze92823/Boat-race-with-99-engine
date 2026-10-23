@@ -1,7 +1,6 @@
 // The on-screen HUD, laid out after the reference screenshot (1920x992):
-//   top-left     - Roblox-style logo + menu pill
 //   top-centre   - race timer, 1st/2nd/3rd podium under it
-//   top-right    - round buttons (spin wheel, calendar, settings)
+//   top-right    - round buttons (spin wheel, calendar)
 //   left         - CLAIM! pill + grid of menu tiles (Rebirth, Pets, Boats, ...)
 //   right        - trophies / wins, AUTO TRAIN / AUTO RACE, boosts
 //   bottom       - the three-row race distance bar with every racer's head
@@ -76,12 +75,6 @@ export function createHud(actions = {}) {
   const root = el('div', 'hud')
   const d = HUD.design
 
-  // --- Top-left: logo + menu/chat pill ---------------------------------------------
-  const tl = el('div', 'hud-tl')
-  const pill = el('div', 'hud-pill')
-  pill.append(button('pill-btn', ICONS.hamburger, actions.menu))
-  tl.append(button('hud-logo', ICONS.logo, actions.menu), pill)
-
   // --- Timer --------------------------------------------------------------------------
   const timer = el('div', 'hud-timer')
   const timerText = text('timer-text', '00:00.000')
@@ -103,7 +96,6 @@ export function createHud(actions = {}) {
   for (const [icon, badge, fn] of [
     ['wheel', true, actions.spin],
     ['calendar', true, actions.daily],
-    ['gear', false, actions.menu],
   ]) {
     const b = button(`hud-round round-${icon}`, ICONS[icon], fn)
     if (badge) b.append(dot())
@@ -232,7 +224,7 @@ export function createHud(actions = {}) {
   bottom.append(bars)
 
   const top = el('div', 'hud-top')
-  top.append(tl, timer, tr)
+  top.append(tr) // the race timer (`timer`) is kept off-screen: not shown in the HUD
   root.append(podium, top, left, right, bottom)
   document.body.appendChild(root)
 
@@ -335,7 +327,7 @@ export function createHud(actions = {}) {
     paintFace(markerHead, 'me', 'player', playerPfp)
     refreshPodium()
   }
-  // Race distance in the same units as HUD.progress (0..30K).
+  // Race distance in the same units as HUD.progress (0..the finish).
   function setDistance(d) {
     playerDistance = d
     place(marker, d)
@@ -393,7 +385,7 @@ export function createHud(actions = {}) {
       best.style.display = d > 0 ? '' : 'none'
       if (d > 0) place(best, d)
     },
-    // Scene mode (the Trails scene): only the logo pill and the round buttons stay.
+    // Scene mode (the Trails scene): only the round buttons stay.
     setScene: (on) => root.classList.toggle('scene', on),
     // Show this time (ms) on the timer instead of the time since load; null goes back.
     setTimer(ms) {

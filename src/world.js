@@ -211,8 +211,9 @@ export function createWorld(scene) {
     setScroll: (m) => (scroll = m),
     update(dt, elapsed) {
       // One ripple tile is 14 m (A) / 37 m (B); v runs toward -Z.
-      normalA.offset.set(elapsed * 0.012, elapsed * 0.02 + scroll / 14)
-      normalB.offset.set(-elapsed * 0.008, elapsed * 0.005 + scroll / 37)
+      // Wrapped to one tile: a 2 h race scrolls ~875 km, too far for a float32 offset.
+      normalA.offset.set(elapsed * 0.012, elapsed * 0.02 + ((scroll / 14) % 1))
+      normalB.offset.set(-elapsed * 0.008, elapsed * 0.005 + ((scroll / 37) % 1))
     },
   }
 }

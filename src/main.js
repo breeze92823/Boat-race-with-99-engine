@@ -1,16 +1,16 @@
 import { ACESFilmicToneMapping, Clock, Group, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
-import { CAMERA, DAILY, graphicsPreset, PHYSICS, RACE, RENDER, TRAILS } from './config.js'
+import { BOATS, CAMERA, DAILY, graphicsPreset, PHYSICS, RACE, RENDER, TRAILS } from './config.js'
 import * as bloxity from './bloxity.js'
-import { initNet, net } from './net.js'
+import { initNet, net, sendLoadout, sendPose, syncAvatar } from './net.js'
 import { inputState, install as installInput, onKey } from './input.js'
 import { installTouch } from './touch.js'
 import { createHud } from './hud.js'
 import { anyWindowOpen, closeTopWindow } from './uiWindow.js'
 import { installAudio, setVolume, sfx, toggleMuted, updateAudio } from './audio/index.js'
 import { createRebirth } from './rebirth.js'
-import { createPets } from './pets.js'
-import { createEngine } from './engine.js'
-import { createPartner } from './partner.js'
+import { createPets, petsState } from './pets.js'
+import { createEngine, ENGINES, engineState } from './engine.js'
+import { createPartner, partnerState } from './partner.js'
 import { createGifts, giftsState } from './gifts.js'
 import { createSpin } from './spin.js'
 import { createDaily } from './daily.js'
@@ -34,10 +34,12 @@ import { createInteract } from './interact.js'
 import { createEggs } from './eggs.js'
 import { createBoat } from './boat.js'
 import { buildBoat, disposeBoat } from './boatModels.js'
-import { createBoats } from './boats.js'
+import { boatState, createBoats } from './boats.js'
 import { createRace } from './race.js'
 import { createTraining } from './training.js'
 import { createBoostPanel } from './boostPanel.js'
+import { createCompanions, updateCompanionMaterials } from './companions.js'
+import { createRemotePlayers } from './remotePlayers.js'
 import { buildDefaultCharacter, loadBaseCharacter } from './avatar/character.js'
 import { applyProportions, attachEquippedAccessories } from './avatar/loader.js'
 import { disposeAnimator, makeAnimator } from './avatar/animator.js'
@@ -162,8 +164,14 @@ bloxity.subscribeAuth((s) => {
     loadAvatar() // also runs once at start to swap in the real rig
   }
 })
-bloxity.onAvatarChanged(loadAvatar)
-bloxity.onProportionsChanged(() => applyProportions(avatar, bloxity.getProportions()))
+bloxity.onAvatarChanged(() => {
+  loadAvatar()
+  syncAvatar() // the others see the new look too (net.js presence)
+})
+bloxity.onProportionsChanged(() => {
+  applyProportions(avatar, bloxity.getProportions())
+  syncAvatar()
+})
 bloxity.onRespawnRequest(() => respawnOrLeave())
 
 // --- Modes + keys --------------------------------------------------------------
@@ -312,6 +320,41 @@ const interact = createInteract({ hud, lobby, shops, eggs, boats: boatsWindow, e
 // E interacts with the object in front of you; with none in range it toggles the Engine window as before.
 onKey('KeyE', () => interact.trigger() || engineWindow.toggle())
 
+// --- Presence: gear in the world, this player for the others, the others for this player ---
+// (made after the start island's objects, so none of this slides away with it during a race)
+// The equipped pets hover round the boat, the partner stands behind the rider and the engines take
+// the equipped engine's colours x the boat's engine count. Polled: any window may change the gear.
+const companions = createCompanions(scene, boat.seat, { shadows: true })
+const engineLooks = new Map(ENGINES.map((e) => [e.id, e.look]))
+const boatEngines = new Map(BOATS.list.map((b) => [b.id, b.engines]))
+let gearKey = ''
+let enginesKey = ''
+function syncGear() {
+  const gear = {
+    boat: boatState.equipped ?? '',
+    engine: engineState.equipped ?? '',
+    trail: trailState.equipped ?? '',
+    partner: partnerState.equipped ?? '',
+    pets: petsState.pets.filter((pt) => pt.equipped).map((pt) => ({ kind: pt.kind, tier: pt.tier })),
+  }
+  const key = JSON.stringify(gear)
+  if (key === gearKey) return
+  gearKey = key
+  const ek = `${gear.boat}|${gear.engine}`
+  if (ek !== enginesKey) {
+    enginesKey = ek
+    boat.setEngines(engineLooks.get(gear.engine) ?? null, boatEngines.get(gear.boat) ?? 1)
+  }
+  companions.setPets(gear.pets)
+  companions.setPartner(gear.partner)
+  sendLoadout(gear)
+}
+syncGear()
+setInterval(syncGear, 250)
+// Everyone else in the room, with their boats, engines, trails, pets and partners (remotePlayers.js).
+const remotes = createRemotePlayers(scene)
+const round = (n) => Math.round(n * 100) / 100
+
 // Progress lives only on the server (net.js): it loads each window's part of the save into it
 // and saves the HUD's trophies + gems and every window's snapshot. Nothing is kept in the browser.
 initNet({ hud, stores: [rebirthWindow, petsWindow, engineWindow, boatsWindow, partnerWindow, giftsWindow, trailsScene, race, eggs] })
@@ -377,6 +420,13 @@ renderer.setAnimationLoop(() => {
   interact.update(camera, staging || racing ? null : player.renderPosition)
   eggs.update(staging || racing ? null : player.renderPosition)
   trail.update(dt, camera, staging ? TRAILS.showcase.speed : scroll)
+  companions.setVisible(playerGroup.visible)
+  companions.update(dt, elapsed, playerGroup.position.x, playerGroup.position.y, playerGroup.position.z, playerGroup.rotation.y)
+  updateCompanionMaterials(elapsed)
+  // This player for the others, in track coordinates (the real position, not the Trails showcase).
+  const track = race.trackScroll()
+  sendPose({ x: round(player.position.x), y: round(player.position.y), z: round(player.position.z - track), yaw: round(player.facing), speed: round(racing ? race.boatSpeed() : speed) })
+  remotes.update(dt, elapsed, player.renderPosition, track, scroll, camera)
   hud.update()
   world.update(dt, elapsed)
   updateParticles(elapsed, renderer.domElement.height)
@@ -404,5 +454,5 @@ if (import.meta.env.DEV) {
     resetPlayer({ x, y, z }, facing)
     syncYawToPlayer()
   }
-  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, toggleDay, teleport, rebirth: rebirthWindow, trails: trailsScene, gifts: giftsWindow, daily: dailyWindow, spin: spinWindow, hud, race, training, eggs, pets: petsWindow, net }
+  window.__game = { player, scene, renderer, camera, postfx, bodies: bodyCount, toggleMode, toggleDay, teleport, rebirth: rebirthWindow, trails: trailsScene, gifts: giftsWindow, daily: dailyWindow, spin: spinWindow, hud, race, training, eggs, pets: petsWindow, net, remotes, companions }
 }

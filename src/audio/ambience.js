@@ -58,7 +58,7 @@ onStart((ctx) => {
   s.shore.connect(s.shorePan).connect(bus)
   s.waveFilter = filt('lowpass', 400, 0.5)
   s.wave = gain(0.12)
-  loop(A.noise.pinkStereo).connect(s.waveFilter).connect(s.wave).connect(s.shore)
+  loop(A.noise.pinkStereo).connect(s.waveFilter).connect(s.wave).connect(gain(0.0025)).connect(s.shore) // 0.0025 = wash trim
   // Fizz: the receding foam, a high hiss under the bubbles.
   s.fizz = gain(0)
   loop(A.noise.pinkStereo).connect(filt('highpass', 3000, 0.5)).connect(s.fizz).connect(s.shore)

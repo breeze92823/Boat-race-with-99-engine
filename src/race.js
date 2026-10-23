@@ -17,7 +17,7 @@ import { setRacing } from './juice.js'
 // ((RACE.baseSpeed + RACE.speedPerBolt * the HUD's lightning) x the Acc boost), A/D or the
 // joystick steer inside the ropes, and every checkpoint wall across the lane
 // it passes pays Wins (the HUD's trophies; raceHud plays the trophy/confetti
-// reward). It ends after RACE.duration or on Leave, shows the result and puts
+// reward). It ends at the finish line (RACE.finish studs) or on Leave, shows the result and puts
 // the player back at the spawn.
 // The sea is only WATER.size wide, so past RACE.cruiseZ the boat stops moving
 // and the world slides past instead: the lane group (period: two buoys, so the
@@ -139,10 +139,11 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
   // step / early: this race's checkpoint spacing and the early checkpoints below it; best: the personal best
   // (studs), record: this race has passed it; boostTap: the tap boost (0..RACE.tap.max);
   // yaw / pitch: the dragged camera orbit on top of the chase framing (0 = straight behind).
-  const s = { racing: false, t: 0, studs: 0, speed: 0, top: 0, x: 0, y: 0, z: 0, scroll: 0, next: 0, earned: 0, camX: 0, sx: 0, sy: 0, boost: null, lastTop: 0, step: 1000, early: CP.early, best: 0, record: false, boostTap: 0, yaw: 0, pitch: 0 }
+  const s = { racing: false, t: 0, studs: 0, speed: 0, top: 0, x: 0, y: 0, z: 0, scroll: 0, next: 0, earned: 0, camX: 0, sx: 0, sy: 0, boost: null, lastTop: 0, step: 1000, payCap: Infinity, early: CP.early, best: 0, record: false, boostTap: 0, yaw: 0, pitch: 0 }
   // Studs of checkpoint i this race, and what it pays before the Wins boost.
   const checkpointAt = (i) => (i < s.early.length ? s.early[i] : (i - s.early.length + 1) * s.step)
-  const checkpointPay = (i) => (i < s.early.length ? 1 : Math.max(1, Math.floor((checkpointAt(i) * s.step) / 1e6)))
+  // Past top speed x CP.paySeconds every checkpoint pays the same (payCap: those studs).
+  const checkpointPay = (i) => (i < s.early.length ? 1 : Math.max(1, Math.floor((Math.min(checkpointAt(i), s.payCap) * s.step) / 1e6)))
   const showNext = () => ui.setNext(checkpointAt(s.next), Math.round(checkpointPay(s.next) * s.boost.wins))
   // The other racers are the remote players racing right now (net.js roster): on the distance bar
   // and podium, refreshed every RACERS_EVERY s whether or not this player is racing. A racer
@@ -192,6 +193,7 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
     s.boost = boosts()
     s.top = (RACE.baseSpeed + RACE.speedPerBolt * hud.getStat('wins')) * s.boost.speed
     s.step = stepFor(s.top)
+    s.payCap = s.top * CP.paySeconds
     s.early = CP.early.filter((v) => v < s.step)
     s.record = false
     if (s.lastTop && s.top > s.lastTop) ui.speedUp(s.lastTop, s.top) // trained since the last race
@@ -250,6 +252,9 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
       hud.setBest(s.best)
     },
     isRacing: () => s.racing,
+    // m the world has scrolled this race (0 when not racing): the track z of anything is its
+    // drawn z minus this (presence: everyone sends and draws poses in track coordinates).
+    trackScroll: () => (s.racing ? s.scroll : 0),
     atGate,
     // Runs after the physics step; returns the scroll speed (m/s) for the trail.
     update(dt) {
@@ -313,7 +318,7 @@ export function createRace({ scene, hud, lobby, world, home, onEnd }) {
 
       ui.setInfo({ ms: s.t * 1000, speed, top: s.top, studs: s.studs, boost: s.boostTap })
       hud.setDistance(s.studs)
-      if (s.t >= RACE.duration) finish()
+      if (s.studs >= RACE.finish) finish()
       return dt > 0 ? scrolled / dt : 0
     },
     // Boat speed in m/s (engine flames, tilt).

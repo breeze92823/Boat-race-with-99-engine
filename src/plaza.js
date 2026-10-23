@@ -28,8 +28,8 @@ import { buildCliff, buildPalm, glow, label, neon, put, solidBox, solidPole, std
 //    lanes (glowing scrolling water, neon rails, SPEED boards with lock /
 //    requirement tags) leaning toward the middle, a dark and a yellow board
 //    behind them and a big "Train" sign
-//  - the VIP "City" portal on a dais in the middle, a glowing yellow VIP gate
-//    and water ramp, under a glowing waterfall with light rays, mist and spray
+//  - the VIP "City" portal on a dais in the middle,
+//    under a glowing waterfall with light rays, mist and spray
 //  - left (+X): the Golden Machine and the Index kiosk; right (-X): Forest
 //    Relics and a treasure chest (the green boat further right is in the
 //    west Boats stall, shops.js)
@@ -134,29 +134,8 @@ function buildVip(root, animated) {
   const frame = std('#2a7bff', { emissive: '#1f6bff', emissiveIntensity: 0.9 })
   put(g, new BoxGeometry(4.2, 2.7, 0.25), [frame, frame, frame, frame, frame, boardFace], 0, H + legH + r + 1.9, 0)
   put(g, new BoxGeometry(4.6, 3.1, 0.15), neon('#7fd8ff'), 0, H + legH + r + 1.9, 0.1)
-
-  // Glowing yellow VIP gate across the step, with lightning bolts.
-  const signFace = std('#ffffff', { map: textFace('VIP', '#1a1205', '#ffd21a'), emissive: '#ffffff', emissiveIntensity: 0.4 })
-  signFace.emissiveMap = signFace.map
-  const yellow = neon('#ffd21a', 2.4)
-  put(g, new BoxGeometry(3.4, 1.1, 0.3), [yellow, yellow, yellow, yellow, yellow, signFace], 0, 2.6, -3.9)
-  for (const s of [-1, 1]) {
-    put(g, new BoxGeometry(0.35, 2.8, 0.35), yellow, s * 2.2, 1.4, -3.9)
-    const bolt = label('⚡', 0.9, { color: '#ffe14a', outline: '#3a2400', font: '700 64px "Segoe UI Emoji", Fredoka, sans-serif', outlineWidth: 6 })
-    bolt.position.set(s * 2.9, 2.0, -4.1)
-    g.add(bolt)
-  }
-  const barrier = put(g, new PlaneGeometry(4.2, 2.2), glow('#ffd84a', 0.3), 0, 1.2, -4.0, false)
-  barrier.rotation.y = Math.PI
-  // Glowing water ramp running down from the gate.
-  const water = canvasTexture(paintLaneWater('#1f9dff'), 1, 1.2)
-  const ramp = put(g, new PlaneGeometry(4, 4), std('#ffffff', { map: water, emissiveMap: water, emissive: '#ffffff', emissiveIntensity: 0.9, roughness: 0.2 }), 0, 0.06, -7, false)
-  ramp.rotation.x = -Math.PI / 2
-  for (const s of [-1, 1]) put(g, new BoxGeometry(0.16, 0.16, 4), neon('#ffd84a'), s * 2.05, 0.12, -7, false)
-  animated.push((t, dt) => {
+  animated.push((t) => {
     portalMat.opacity = 0.4 + Math.sin(t * 2.2) * 0.08
-    barrier.material.opacity = 0.25 + Math.sin(t * 3) * 0.08
-    water.offset.y -= dt * 0.8
   })
 }
 
@@ -408,12 +387,6 @@ function buildParticles(scene, lanes) {
     ],
     count: 90, life: 4.5, velocity: [0, 0.45, 0], spread: [0.25, 0.25, 0.25],
     size: 0.75, color: '#ffffff', intensity: 2.4, twinkle: 5, sprite: 'sparkle', seed: 13,
-  })
-  // Golden motes rising off the VIP gate.
-  createEmitter(scene, {
-    boxes: [{ x: P.vip.x, y: 0.6, z: P.vip.z - 4.2, sx: 2, sy: 0.3, sz: 0.4 }],
-    count: 45, life: 2.2, velocity: [0, 1.4, 0], spread: [0.3, 0.4, 0.3],
-    size: 0.35, color: '#ffd84a', intensity: 3, twinkle: 7, seed: 14,
   })
   // Bubbles rising off every treadmill, tinted by its neon.
   const L = P.lane

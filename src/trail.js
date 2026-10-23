@@ -88,6 +88,11 @@ export function createTrail(scene, boatRoot) {
   }
 
   return {
+    // Off the scene for good (a remote player's trail when they leave); the materials are kept.
+    dispose() {
+      scene.remove(mesh)
+      geo.dispose()
+    },
     // trail: a TRAILS.list entry, or null for none.
     set(trail) {
       mesh.visible = !!trail

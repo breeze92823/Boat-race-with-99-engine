@@ -9,14 +9,29 @@ export const DEV_MODE = import.meta.env.VITE_DEV_MODE === 'true'
 
 // --- Server (net.js) -----------------------------------------------------------
 // The Colyseus server (../Boat-race-with-99-engine-backend) holds the only save: nothing is kept
-// in the browser. One URL per Bloxity Legion channel; empty = the Bloxity SDK resolves it.
-const SERVER_URL_DEV = import.meta.env.VITE_SERVER_URL_DEV || (import.meta.env.DEV ? 'ws://localhost:2567' : '')
-const SERVER_URL_MAIN = import.meta.env.VITE_SERVER_URL_MAIN || ''
-export const SERVER_URL = import.meta.env.MODE === 'production' ? SERVER_URL_MAIN : SERVER_URL_DEV
+// in the browser. Deployed builds (prod and the dev channel) always go through the Bloxity
+// matchmaker (Legion.SDK.net.resolveEndpoint): a fixed socket URL would pin everyone to one pod.
+// Only the local dev server (`npm run dev`) connects straight to a URL.
+export const SERVER_URL = import.meta.env.DEV ? import.meta.env.VITE_SERVER_URL_DEV || 'ws://localhost:2567' : ''
 export const NET = {
   saveEvery: 5, // s: progress is sent at most this often (and when the tab hides or closes)
-  retry: 10, // s between connection attempts while the server is unreachable
+  retry: 2, // s before the first reconnect; doubles after each failed resolve/join...
+  retryMax: 30, // ...up to this (the matchmaker can hold a cold start for ~45 s)
+  rejoin: 1, // s before resolving again after the room closed (e.g. its pod is being replaced)
   raceEvery: 0.25, // s: this player's race distance is relayed to the others at most this often
+  // Presence (remotePlayers.js): this player's pose goes out at most `poseHz` times a second
+  // (skipped while it stands still); remote players ease toward their last pose (plus
+  // speed x heading for the time since it came: dead reckoning) at `remoteLerp` 1/s. The nearest
+  // `maxRemotes` (fewer on touch) are drawn within `remoteFade` m (racers further down the lane
+  // within `raceFade`); pets, partner and trail only within `detailRange` m.
+  poseHz: 10,
+  remoteLerp: 10,
+  predictMax: 0.4, // s of dead reckoning at most (a stalled sender stops instead of drifting off)
+  remoteFade: 220,
+  raceFade: 600,
+  maxRemotes: 20,
+  maxRemotesTouch: 10,
+  detailRange: 90,
 }
 
 // --- World (metres: +X east, +Z south, +Y up) -------------------------------
@@ -486,6 +501,19 @@ export const PETS = {
   ],
 }
 
+// --- Pets + partner in the world (companions.js) ----------------------------------------
+// Equipped pets hover in these slots round the boat (boat frame: +Z = forward, metres; the
+// first ones beside the stern, the rest further back and higher), bobbing `bob` m and swinging
+// after turns (`turnLag` 1/s). The partner stands on the boat behind the rider.
+export const COMPANIONS = {
+  slots: [[-2.1, 0.9, -1.4], [2.1, 0.9, -1.4], [0, 1.4, -3.2], [-2.3, 1.4, -3.5], [2.3, 1.4, -3.5], [-1.2, 1.9, -4.8], [1.2, 1.9, -4.8], [0, 2.3, -5.6]],
+  petScale: 0.95,
+  hugeScale: 1.7, // 'huge…' pet kinds
+  bob: 0.14,
+  turnLag: 4,
+  partnerScale: 0.8,
+}
+
 // --- Online Gifts (gifts.js) -------------------------------------------------------
 // Play-time rewards. Order = grid order (4 per row). at = minutes online until the
 // gift can be claimed; the clock only runs while the game is open and visible, and
@@ -681,11 +709,17 @@ export const HUD = {
   dailyGems: 9,
   boosts: { friends: 0, playtime: 2 }, // percent shown bottom-left
   // Race distance milestones: one row per zoom level, the bottom row is the
-  // finest (0..2K), then 2K..13K, then 13K..30K. `to` = distance at the
+  // finest (0..2K), then 2K..13K, then 13K..the finish (RACE.finish, 2.5M). `to` = distance at the
   // segment's right edge, `at` = that edge in reference pixels (bar spans
   // 438..1482, the bottom row starts at 462 after the player's head at 440).
   progress: [
-    [{ label: '30K', to: 30000, color: '#8f3dff', at: 1482 }],
+    [
+      { label: '30K', to: 30000, color: '#8f3dff', at: 560 },
+      { label: '100K', to: 100000, color: '#b13dff', at: 760 },
+      { label: '500K', to: 500000, color: '#d83dff', at: 1010 },
+      { label: '1M', to: 1000000, color: '#ff3dd8', at: 1230 },
+      { label: '2.5M', to: 2500000, color: '#ffd23d', at: 1482 },
+    ],
     [
       { label: '3K', to: 3000, color: '#ffff00', at: 710 },
       { label: '7K', to: 7000, color: '#1a3cff', at: 1088 },
@@ -735,7 +769,10 @@ export const RACE = {
   accelTime: 5, // s from 0 to top speed (shortened by the acc boost, boosts.js)
   metresPerStud: 0.35,
   cruiseZ: -130,
-  duration: 90, // s per race
+  // The race ends at the finish line (or on Leave): `finish` studs down the lane. A new player
+  // tops out at 262 studs/s (145 x the starter gear's +81%), 341 with the tap boost held full,
+  // so 2.5M studs is at least 2 h of racing (~2.65 h without tapping).
+  finish: 2.5e6,
   steerSpeed: 12, // m/s sideways at full stick
   laneMargin: 3, // m kept clear of the ropes
   lane: { length: 700, buoySpacing: 1.9, stripe: 1.9 }, // race lane past the gate (replaces the lobby's ropes while racing)
@@ -778,11 +815,15 @@ export const RACE = {
   // comes every ~7 s at any speed (145 -> every 1K, like the reference); the
   // `early` distances below that step come first. A regular checkpoint pays
   // floor(studs x step / 1M) Wins, at least 1 (9K with a 1K step -> +9, like the
-  // reference; total per race ~ distance^2 / 2M whatever the step), an early one 1,
+  // reference; total ~ distance^2 / 2M whatever the step), an early one 1. The studs in that
+  // formula stop growing at top speed x `paySeconds`, so past there every checkpoint pays the
+  // same and Wins come in at a steady rate: 45 s matches the old 90 s races back to back
+  // (Wins per hour ~ 45 x speed^2 x 3600 / 1M at any speed; a new player's 2.5M-stud race ~29K),
+  // instead of growing with the square of a 2 h race's distance,
   // x the Wins boost (boosts.js): a trophy "+N" pops by the studs callout, `trophies` trophy icons
   // fly from the boat into the trophy counter (each adds its share as it lands)
   // and confetti rains down (`confetti` pieces, `confettiTouch` on touch screens).
-  checkpoint: { early: [10, 25, 50, 100, 250, 500], seconds: 7, steps: [100, 250, 500, 1e3, 2.5e3, 5e3, 1e4, 2.5e4, 5e4, 1e5, 2.5e5, 5e5, 1e6], ahead: 4, wallHeight: 36, color: '#e4fbff', opacity: 0.5 },
+  checkpoint: { early: [10, 25, 50, 100, 250, 500], seconds: 7, paySeconds: 45, steps: [100, 250, 500, 1e3, 2.5e3, 5e3, 1e4, 2.5e4, 5e4, 1e5, 2.5e5, 5e5, 1e6], ahead: 4, wallHeight: 36, color: '#e4fbff', opacity: 0.5 },
   reward: { trophies: [3, 7], flight: 1.15, stagger: 0.09, popup: 2.2, confetti: 70, confettiTouch: 36, colors: ['#ff2a2a', '#ffe11a', '#22d34a', '#1a3cff'] },
   gauge: ['#3ff0d0', '#5fe84a', '#d8f23a', '#ffb21a', '#ff4a1a', '#e81a3a', '#a01aff'], // speedometer arc, slow -> fast
   resultSeconds: 3.2, // how long the race result stays up

@@ -273,8 +273,9 @@ export function toggleCustomizer() {
 }
 
 // --- Game server ------------------------------------------------------
-// Bloxity hosting has no fixed socket URL: the SDK resolves this game's server endpoint (the dev
-// channel reaches the dev backend, prod the prod one). Used by net.js when no SERVER_URL is set.
+// Bloxity hosting has no fixed socket URL: the matchmaker picks a pod with room (or wakes one) and
+// the SDK returns its endpoint (the dev channel reaches the dev backend, prod the prod one). Each
+// endpoint is pinned to one pod, so net.js builds a new Client per resolve.
 export function canResolveServer() {
   try {
     return typeof sdk()?.net?.resolveEndpoint === 'function'
@@ -282,10 +283,53 @@ export function canResolveServer() {
     return false
   }
 }
-// Rejects (net.js retries) when the SDK can't answer.
-export async function resolveServerEndpoint() {
-  const { endpoint } = await sdk().net.resolveEndpoint(GAME_SLUG)
-  return endpoint
+// { endpoint, relayRoomId }: relayRoomId is the matchmaker relay pinning the pod (the endpoint is
+// {playUrl}/v1/ws/<relayRoomId>). Rejects (net.js retries with backoff) when the matchmaker can't answer.
+export async function resolveServerEndpoint(userId) {
+  const { endpoint, roomId, cold } = await sdk().net.resolveEndpoint(GAME_SLUG, userId ? { userId } : undefined)
+  if (cold) console.info('[net] waking up a server...')
+  return { endpoint, relayRoomId: roomId }
+}
+
+// The ?roomId= the page was opened with: the game page's Open Rooms Join button (a bare Colyseus
+// room id) or a friend invite (what updateRoom() reported: "<relayRoomId>~<colyseusRoomId>").
+export function launchRoomId() {
+  try {
+    return new URLSearchParams(location.search).get('roomId') || ''
+  } catch {
+    return ''
+  }
+}
+
+// Where a launch room lives: { endpoint, roomId, relayRoomId }, or null when it is gone, full or
+// can't be found. A bare id needs the matchmaker's cross-pod directory (a plain joinById through
+// any relay would usually land on another pod); a relay~room id is joined through its relay.
+export async function locateRoom(id) {
+  const playUrl = (() => {
+    try {
+      return sdk()?.environment?.()?.playUrl
+    } catch {
+      return '' // Older SDK builds have no environment().
+    }
+  })()
+  if (!playUrl || !id) return null
+  const base = playUrl.replace(/\/$/, '')
+  const [relay, roomId] = id.includes('~') ? id.split('~', 2) : ['', id]
+  if (relay) return { endpoint: `${base.replace(/^http/i, 'ws')}/v1/ws/${encodeURIComponent(relay)}`, roomId, relayRoomId: relay }
+  const res = await fetch(`${base}/v1/dir/${encodeURIComponent(GAME_SLUG)}/list`)
+  const rooms = res.ok ? (await res.json())?.rooms ?? [] : []
+  const r = rooms.find((r) => r.colyseusRoomId === roomId && !r.locked && r.players < r.maxPlayers)
+  return r ? { endpoint: r.joinUrl, roomId: r.colyseusRoomId, relayRoomId: r.relayRoomId } : null
+}
+
+// Reports the room this player is in ('' = not in a joinable room), so the portal's friend invites
+// land in it.
+export function updateRoom(roomId) {
+  try {
+    sdk()?.game?.updateRoom?.(roomId)
+  } catch {
+    // Ignore.
+  }
 }
 
 // --- Portal -----------------------------------------------------------

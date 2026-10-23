@@ -127,6 +127,15 @@ export function createEmitter(scene, opts) {
   return points
 }
 
+// Takes an emitter out of the scene and frees it (a remote player's boat leaving).
+export function removeEmitter(points) {
+  const i = emitters.findIndex((e) => e.points === points)
+  if (i >= 0) emitters.splice(i, 1)
+  points.removeFromParent()
+  points.geometry.dispose()
+  points.material.dispose()
+}
+
 // 0..1 share of every emitter's particles that are drawn (graphics preset).
 export function setParticleDensity(d) {
   density = d

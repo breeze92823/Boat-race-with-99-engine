@@ -10,7 +10,19 @@
 // fresh, unsaved state and keeps trying to connect.
 import { Client } from '@colyseus/sdk'
 import { DEV_MODE, NET, SERVER_URL } from './config.js'
-import { authState, canResolveServer, getPfp, resolveServerEndpoint, subscribeAuth } from './bloxity.js'
+import {
+  authState,
+  canResolveServer,
+  getEquippedAvatar,
+  getPfp,
+  getProportions,
+  getSkinTextureUrl,
+  launchRoomId,
+  locateRoom,
+  resolveServerEndpoint,
+  subscribeAuth,
+  updateRoom,
+} from './bloxity.js'
 
 export const net = {
   room: null,
@@ -135,6 +147,63 @@ export function sendRace(racing, distance) {
   send('race', { racing, distance: racing ? Math.floor(distance) : 0 })
 }
 
+// --- Presence (remotePlayers.js) --------------------------------------------------
+// What the others need to draw this player: the pose (track coordinates, see race.trackScroll),
+// the equipped gear and the Bloxity look. The latest of each also rides on the join options, so a
+// (re)join shows up right away. The roster (`net.room.state.players`) carries everyone's.
+const AVATAR_MAX = 3000 // backend AVATAR_MAX_LEN
+// The signed-in player's look as JSON { equipped, proportions, skin }; the skin URL is dropped
+// first when it doesn't fit. "" = the default character.
+function avatarJson() {
+  if (!authState.user) return ''
+  const equipped = getEquippedAvatar()
+  if (!equipped) return ''
+  for (const skin of [getSkinTextureUrl(), null]) {
+    try {
+      const json = JSON.stringify({ equipped, proportions: getProportions(), skin })
+      if (json.length <= AVATAR_MAX) return json
+    } catch {
+      return ''
+    }
+  }
+  return ''
+}
+const presence = { pose: null, loadout: null }
+let poseKey = ''
+let poseAt = 0
+// { x, y, z, yaw, speed }: at most NET.poseHz a second, nothing while it stands still.
+export function sendPose(pose) {
+  presence.pose = pose
+  if (!net.connected) return
+  const now = performance.now()
+  if (now - poseAt < 1000 / NET.poseHz) return
+  const key = `${pose.x}|${pose.y}|${pose.z}|${pose.yaw}|${pose.speed}`
+  if (key === poseKey) return
+  poseKey = key
+  poseAt = now
+  send('pose', pose)
+}
+let loadoutKey = ''
+// { boat, engine, trail, partner, pets: [{ kind, tier }] }: sent when it changes.
+export function sendLoadout(loadout) {
+  presence.loadout = loadout
+  const key = JSON.stringify(loadout)
+  if (!net.connected || key === loadoutKey) return
+  loadoutKey = key
+  send('loadout', loadout)
+}
+let sentAvatar = ''
+// The Bloxity look changed (customizer, sign-in/out): send it if it differs.
+export function syncAvatar() {
+  if (!net.connected) return
+  const avatar = avatarJson()
+  if (avatar === sentAvatar) return
+  sentAvatar = avatar
+  send('setAvatar', { avatar })
+}
+// Everyone in the room (sessionId -> roster entry), null when offline.
+export const roster = () => (net.connected ? net.room?.state?.players ?? null : null)
+
 // --- Connection --------------------------------------------------------------
 let sentPfp = '' // the profile picture the server shows the others (roster `pfp`)
 function attach(room) {
@@ -168,13 +237,42 @@ function attach(room) {
     net.room = null
     net.connected = false
     net.hydrated = false
-    setTimeout(connect, 3000) // keep trying; play is unaffected meanwhile
+    updateRoom('')
+    // Resolve again rather than rejoin the old endpoint: that is how players move off a pod being
+    // replaced. Keep trying; play is unaffected meanwhile.
+    setTimeout(connect, NET.rejoin * 1000)
   })
 }
 
 export const hasServer = () => !!(SERVER_URL || canResolveServer())
 
+// The ?roomId= this page was opened with (Open Rooms Join / friend invite): tried on the first
+// connect only, then normal matchmaking.
+let launchRoom = launchRoomId()
+async function joinLaunchRoom(options) {
+  const id = launchRoom
+  launchRoom = ''
+  if (!id) return null
+  try {
+    if (SERVER_URL) return { room: await new Client(SERVER_URL).joinById(id.split('~').pop(), options), relay: '' }
+    const at = await locateRoom(id)
+    if (at) return { room: await new Client(at.endpoint).joinById(at.roomId, options), relay: at.relayRoomId }
+  } catch (err) {
+    console.info('[net] the invited room is gone or full; matchmaking instead', err?.message ?? err)
+  }
+  return null
+}
+
+// Deployed builds ask the matchmaker on every connect (a new Client per endpoint, each is pinned to
+// one pod). userId lets it reuse this player's seat on retries; guest/dev ids are not Bloxity ids.
+async function joinAnyRoom(options) {
+  if (SERVER_URL) return { room: await new Client(SERVER_URL).joinOrCreate('world', options), relay: '' }
+  const { endpoint, relayRoomId } = await resolveServerEndpoint(/^(guest|dev)-/.test(options.userId) ? undefined : options.userId)
+  return { room: await new Client(endpoint).joinOrCreate('world', options), relay: relayRoomId }
+}
+
 let connecting = false
+let retryIn = NET.retry // s: backoff while the matchmaker / server can't be reached
 async function connect() {
   if (!hasServer() || connecting || net.connected) return
   connecting = true
@@ -183,11 +281,19 @@ async function connect() {
     sentId = id.userId
     sentPfp = getPfp()
     raceSent = false
-    const client = new Client(SERVER_URL || (await resolveServerEndpoint()))
-    attach(await client.joinOrCreate('world', { ...id, pfp: sentPfp }))
+    sentAvatar = avatarJson()
+    loadoutKey = JSON.stringify(presence.loadout)
+    poseKey = ''
+    const options = { ...id, pfp: sentPfp, avatar: sentAvatar, pose: presence.pose, loadout: presence.loadout }
+    const { room, relay } = (await joinLaunchRoom(options)) ?? (await joinAnyRoom(options))
+    retryIn = NET.retry
+    attach(room)
+    // relay~room lets an invited friend join this exact room through its pod's relay (bloxity.js locateRoom).
+    updateRoom(relay ? `${relay}~${room.roomId}` : room.roomId)
   } catch (err) {
-    console.info('[net] could not reach the server; progress is not being saved', err?.message ?? err)
-    setTimeout(connect, NET.retry * 1000)
+    console.info(`[net] could not reach the server (retrying in ${retryIn}s); progress is not being saved`, err?.message ?? err)
+    setTimeout(connect, retryIn * 1000)
+    retryIn = Math.min(retryIn * 2, NET.retryMax)
   } finally {
     connecting = false
   }
@@ -213,6 +319,7 @@ export function initNet(opts = {}) {
     if (!net.connected) return void connect()
     const id = identity()
     sentPfp = getPfp()
+    syncAvatar() // signed in / out: the others see the new look
     if (id.userId === sentId) return send('identify', { username: id.username, pfp: sentPfp })
     saveNow() // under the old id, before switching
     net.hydrated = false
